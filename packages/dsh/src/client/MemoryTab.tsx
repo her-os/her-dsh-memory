@@ -1,9 +1,9 @@
-/** Memory management page inside the Plugins settings section. */
+/** Memory management page on this bundle's page in Plugins. */
 
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 
-/** Props assembled by the Settings slot renderer. */
-export type MemoryTabProps = PropsRuntime<'settings.plugins.tab'> & PropsLocale<'herMemory'>
+/** Props assembled by the Plugins page slot renderer. */
+export type MemoryTabProps = PropsRuntime<'plugins.bundle.config'> & PropsLocale<'herMemory'>
 
 /**
  * Render the memory page.
