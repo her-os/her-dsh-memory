@@ -106,7 +106,7 @@ async function recallRun(extra: number): Promise<Record<string, unknown>> {
     db, prompts: DEFAULT_PROMPTS, logger: silentLogger,
     clock: { now: () => now, timeZone: 'Asia/Shanghai', dayStartHour: 4 },
     llm: { complete: async () => '{"memories":[],"proactive":[]}' },
-    settings: () => ({ paused: false, recallCount: 5, injectBudget: 800, embeddingTimeoutMs: 1500, proactive: 'off', dailyExtractLimit: 200 }),
+    settings: () => ({ paused: false, recallCount: 5, injectBudget: 800, embeddingTimeoutMs: 1500, proactive: 'off', dailyExtractLimit: 200, extractBatchTurns: 3, extractIdleMs: 300_000, extractBeforeRecall: false }),
   })
   try {
     const ids: number[] = []

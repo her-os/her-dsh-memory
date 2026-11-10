@@ -37,6 +37,12 @@ export interface EngineSettings {
   readonly embeddingTimeoutMs: number
   readonly proactive: ProactiveLevel
   readonly dailyExtractLimit: number
+  /** Queued turns of one session that trigger an extraction; 1 extracts after every turn. */
+  readonly extractBatchTurns: number
+  /** Quiet time after which a session's queued turns are extracted. */
+  readonly extractIdleMs: number
+  /** Before recalling, extract what other sessions left queued, waiting at most {@link RECALL_FLUSH_WAIT_MS}. */
+  readonly extractBeforeRecall: boolean
 }
 
 /** Host-supplied dependencies. */
@@ -66,11 +72,8 @@ export const EMBED_BATCH_TIMEOUT_MS = 10_000
 /** Backfill attempts before a batch waits for the next trigger. */
 export const EMBED_MAX_ATTEMPTS = 5
 
-/** Turns of one session merged into one extraction. */
-export const EXTRACT_BATCH_TURNS = 3
-
-/** Quiet time after which a session's queued turns are extracted. */
-export const EXTRACT_IDLE_MS = 5 * 60_000
+/** Longest a turn waits for other sessions' queued turns to be extracted before it recalls. */
+export const RECALL_FLUSH_WAIT_MS = 8_000
 
 /** Retries of a failed extraction before the turns are dropped. */
 export const EXTRACT_MAX_ATTEMPTS = 3
@@ -86,6 +89,9 @@ export const DUPLICATE_OVERLAP = 0.8
 
 /** Token overlap at which a new memory matches a suppression. */
 export const SUPPRESS_OVERLAP = 0.6
+
+/** Vector similarity from which the management page search counts a memory as a match by meaning. */
+export const SEARCH_SIMILARITY = 0.5
 
 /** Vector similarity at which a new memory matches a suppression. */
 export const SUPPRESS_SIMILARITY = 0.85
@@ -361,6 +367,10 @@ export class MemoryEngine {
     const lastTurnAt = this.repo.meta(lastTurnKey)
     this.repo.setMeta(lastTurnKey, now.toISOString())
 
+    // What the user said in another session must be recallable here, even before that session's batch is due.
+    if (settings.extractBeforeRecall) await this.flushOtherSessions(request.sessionId, request.signal)
+    if (request.signal?.aborted === true) return empty
+
     const wantVectors = !this.skipVectorsNextTurn
     this.skipVectorsNextTurn = false
     const query = wantVectors && request.userText.trim() !== '' ? await this.embedOne(request.userText, 'query', settings.embeddingTimeoutMs, request.signal) : undefined
@@ -458,17 +468,19 @@ export class MemoryEngine {
   }
 
   /**
-   * Extract every session that is due: {@link EXTRACT_BATCH_TURNS} queued
-   * turns, {@link EXTRACT_IDLE_MS} of quiet, or listed in `flush`. One
+   * Extract every session that is due: `extractBatchTurns` queued turns,
+   * `extractIdleMs` of quiet, or listed in `flush`. One
    * extraction runs at a time.
    * @param flush - sessions to extract now regardless of size.
    * @returns when this pass finishes.
    */
   async pump(flush: ReadonlySet<string> = new Set()): Promise<void> {
-    if (this.extracting !== undefined) {
-      await this.extracting
-      if (flush.size === 0) return
+    let waited = false
+    while (this.extracting !== undefined) {
+      waited = true
+      await this.extracting.catch(() => undefined)
     }
+    if (waited && flush.size === 0) return
     const run = this.runExtraction(flush)
     this.extracting = run
     try {
@@ -478,12 +490,39 @@ export class MemoryEngine {
     }
   }
 
+  /**
+   * Extract the queued turns of every session but one, waiting at most
+   * {@link RECALL_FLUSH_WAIT_MS}; the extraction itself keeps running.
+   * @param sessionId - the session about to recall; its own turns are still in its context.
+   * @param signal - abort of the turn.
+   */
+  private async flushOtherSessions(sessionId: string, signal: AbortSignal | undefined): Promise<void> {
+    const others = new Set([...this.repo.dueQueue(this.ports.clock.now()).keys()].filter(id => id !== sessionId))
+    if (others.size === 0) return
+    const run = this.pump(others).catch((error: unknown) => {
+      this.ports.logger.warn('extraction before recall failed: %s', error instanceof Error ? error.message : String(error))
+    })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let onAbort: (() => void) | undefined
+    await Promise.race([
+      run,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, RECALL_FLUSH_WAIT_MS)
+        onAbort = resolve
+        signal?.addEventListener('abort', onAbort, { once: true })
+      }),
+    ])
+    clearTimeout(timer)
+    if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort)
+  }
+
   private async runExtraction(flush: ReadonlySet<string>): Promise<void> {
     const now = this.ports.clock.now()
+    const { extractBatchTurns, extractIdleMs } = this.ports.settings()
     for (const [sessionId, items] of this.repo.dueQueue(now)) {
       if (this.disposed) return
       const quietMs = Date.now() - (this.lastEnqueue.get(sessionId) ?? 0)
-      if (!flush.has(sessionId) && items.length < EXTRACT_BATCH_TURNS && quietMs < EXTRACT_IDLE_MS) continue
+      if (!flush.has(sessionId) && items.length < extractBatchTurns && quietMs < extractIdleMs) continue
       if (!this.takeDailyQuota()) {
         this.ports.logger.warn('daily extraction limit reached; %d turns stay queued', items.length)
         return
@@ -806,12 +845,37 @@ export class MemoryEngine {
   }
 
   /**
-   * One page for the management page.
+   * One page for the management page. A search text matches by keywords,
+   * ranked by BM25, and by meaning when vectors exist; the two rankings are
+   * fused as in recall. Without a search, newest first.
    * @param query - filters and window.
    * @returns the page.
    */
-  list(query: ListQuery): { items: Memory[]; total: number } {
-    return this.repo.list(query)
+  async list(query: ListQuery): Promise<{ items: Memory[]; total: number }> {
+    const text = query.search?.trim() ?? ''
+    if (text === '') return this.repo.list(query)
+    const { offset, limit, search: _search, ...filter } = query
+    const keywordIds = this.repo.listIds({ ...filter, search: text })
+    const similar = await this.similarIds(text)
+    const allowed = new Set(this.repo.listIds({ ...filter, ids: similar }))
+    const fused = [...reciprocalRankFusion([keywordIds, similar.filter(id => allowed.has(id))]).entries()]
+      .sort((a, b) => b[1] - a[1]).map(([id]) => id)
+    const page = fused.slice(offset, offset + limit)
+    const memories = this.repo.getMany(page)
+    return { items: page.flatMap(id => memories.get(id) ?? []), total: fused.length }
+  }
+
+  /** Memories close in meaning to `text`, best first; empty without usable vectors. */
+  private async similarIds(text: string): Promise<number[]> {
+    const query = await this.embedOne(text, 'query', this.ports.settings().embeddingTimeoutMs)
+    const index = query === undefined ? undefined : this.vectorIndex()
+    if (index === undefined || query === undefined || query.length !== index.dim) return []
+    try {
+      return (await index.searchAsync(query, RETRIEVAL_DEPTH)).filter(hit => hit.score >= SEARCH_SIMILARITY).map(hit => hit.id)
+    } catch (error) {
+      this.ports.logger.warn('vector search failed; keywords only: %s', error instanceof Error ? error.message : String(error))
+      return []
+    }
   }
 
   /**

@@ -1,8 +1,11 @@
 /**
  * The management tab inside a real `dsh web`: memories learned through the
- * headless profile show up, and edits made in the UI land in the database.
+ * headless profile show up, edits made in the UI land in the database, and
+ * the plugin's settings are edited on the same page.
  */
 
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { type Browser, chromium, type Page } from 'playwright-core'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { DshHome, type WebServer } from '../src/dsh.ts'
@@ -25,6 +28,14 @@ let page: Page
 
 const rows = (): Row[] => home.query<Row>('SELECT id, content, status, pinned, supersedes FROM memories ORDER BY id')
 const row = (content: string): Row | undefined => rows().find(r => r.content === content)
+/** Every settings layer file of a profile, concatenated. */
+const patchText = (profile: string): string => {
+  const dir = join(home.dir, 'profiles', profile)
+  return readdirSync(dir, { recursive: true, encoding: 'utf8' })
+    .filter(name => /\.ya?ml$/u.test(name))
+    .map(name => readFileSync(join(dir, name), 'utf8'))
+    .join('\n')
+}
 const meta = (key: string): string | undefined => home.query<{ value: string }>('SELECT value FROM meta WHERE key = ?', key)[0]?.value
 
 beforeAll(async () => {
@@ -66,7 +77,16 @@ describe('her-memory management tab in DSH web', () => {
   it('lists the learned memories with their counts', async () => {
     await expect.poll(() => page.getByText(CAT_MEMORY).count()).toBeGreaterThan(0)
     await expect.poll(() => page.getByText(INTERVIEW_MEMORY).count()).toBeGreaterThan(0)
-    await expect.poll(() => page.getByText(/在用 2 条/u).count()).toBeGreaterThan(0)
+    await expect.poll(() => page.getByTestId('her-memory-stat-active').textContent()).toBe('在用2')
+  })
+
+  it('searches memories by keyword', async () => {
+    const search = page.getByRole('searchbox', { name: '按关键词或意思搜索' })
+    await search.fill('面试')
+    await expect.poll(() => page.getByText(CAT_MEMORY).count()).toBe(0)
+    expect(await page.getByText(INTERVIEW_MEMORY).count()).toBeGreaterThan(0)
+    await search.fill('')
+    await expect.poll(() => page.getByText(CAT_MEMORY).count()).toBeGreaterThan(0)
   })
 
   it('shows why a memory was recalled', async () => {
@@ -110,5 +130,35 @@ describe('her-memory management tab in DSH web', () => {
     await home.headless('我下个月要去成都出差')
     expect(queued()).toBe(before)
     expect(home.query("SELECT 1 FROM extract_queue WHERE payload LIKE '%成都%'")).toHaveLength(0)
+  })
+
+  it('edits the settings from the page, and the plugin picks them up', async () => {
+    const settings = page.getByTestId('her-memory-settings')
+    await settings.getByRole('button', { name: '展开设置' }).click()
+    const source = settings.getByLabel('语义检索来源')
+    expect(await source.inputValue()).toBe('off')
+    await source.selectOption('remote')
+    // The Host plugin reloads with the new source: remote without an address reports itself unconfigured.
+    await expect.poll(() => page.getByText(/未配置向量服务/u).count(), { timeout: 30_000 }).toBeGreaterThan(0)
+    await expect.poll(() => settings.getByLabel('服务地址').count()).toBe(1)
+
+    const recall = settings.getByLabel('每轮最多带入几条记忆')
+    await recall.fill('99')
+    await expect.poll(() => settings.getByText('请输入 1 到 20 之间的整数').count()).toBe(1)
+    await recall.fill('7')
+    await recall.press('Enter')
+    await expect.poll(() => patchText('web'), { timeout: 30_000 }).toMatch(/recallCount\W+7/u)
+    expect(patchText('web')).toMatch(/provider\W+remote/u)
+
+    const batch = settings.getByLabel('攒满几轮整理一次')
+    expect(await batch.inputValue()).toBe('3')
+    await batch.fill('1')
+    await batch.press('Enter')
+    await expect.poll(() => patchText('web'), { timeout: 30_000 }).toMatch(/extractBatchTurns\W+1/u)
+    await settings.getByLabel('回复前先整理其它会话').selectOption('off')
+    await expect.poll(() => patchText('web'), { timeout: 30_000 }).toMatch(/extractBeforeRecall\W+false/u)
+
+    await source.selectOption('off')
+    await expect.poll(() => page.getByText(/只用关键词检索。可在下方「设置」里/u).count(), { timeout: 30_000 }).toBeGreaterThan(0)
   })
 })

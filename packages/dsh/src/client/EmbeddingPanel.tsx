@@ -3,10 +3,10 @@
  * model's download and load state, index progress, and the local model catalog.
  */
 
-import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Tag, type TagTone } from '@deepseek-ai/dsh-client-ui-primitives'
 import { type ReactNode, useEffect, useState } from 'react'
 import type { EmbeddingStatus, LocalModelItem, LocalModelStatus, MemoryApi } from './api.ts'
-import { S, type T, useLoad } from './ui.tsx'
+import { type Loaded, S, type T, useLoad } from './ui.tsx'
 
 /** Refresh while something is moving. */
 const POLL_MS = 2000
@@ -47,37 +47,60 @@ function localLine(local: LocalModelStatus, t: T): string {
   }
 }
 
+/** Short status of semantic search, shown as a tag next to the title. */
+function statusTag(embedding: EmbeddingStatus, t: T): [TagTone, string] {
+  if (embedding.provider === 'off') return ['neutral', t('embeddingDisabled')]
+  const { local } = embedding
+  if (local === null) return embedding.configured ? ['success', t('tagReady')] : ['warning', t('tagNotConfigured')]
+  switch (local.state) {
+    case 'downloading': return ['info', t('tagDownloading')]
+    case 'waiting': return ['info', t('tagWaiting')]
+    case 'loading': return ['info', t('tagLoading')]
+    case 'ready': return ['success', t('tagReady')]
+    case 'error': return ['danger', t('tagError')]
+    case 'unsupported': return ['warning', t('tagUnsupported')]
+    case 'idle': return local.downloaded ? ['success', t('tagDownloaded')] : ['warning', t('tagMissing')]
+  }
+}
+
 /**
- * The semantic-search block.
- * @param props - api, translator, status, action runner and refresh.
- * @returns the block.
+ * The semantic-search card.
+ * @param props - api, translator, status, action runner, refresh and model selection.
+ * @returns the card.
  */
-export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged }: {
+export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged, selectModel }: {
   api: MemoryApi
   t: T
   embedding: EmbeddingStatus
   run: (action: () => Promise<unknown>) => Promise<boolean>
   busy: boolean
   onChanged: () => void
+  /** Select a local model in the settings; the Host then downloads and loads it. */
+  selectModel: (id: string) => void
 }): ReactNode {
   const [test, setTest] = useState<string | undefined>()
   const [catalogOpen, setCatalogOpen] = useState(false)
   const { local } = embedding
+  const version = `${local?.model ?? ''}:${String(local?.downloaded ?? false)}`
+  const catalog = useLoad(async () => embedding.provider === 'local' ? await api.localModels() : undefined, [api, embedding.provider, version])
+  const modelName = catalog.value?.models.find(model => model.id === local?.model)?.name ?? local?.model ?? ''
   const progress = local !== null && local.state === 'downloading' && local.total > 0 ? local.received / local.total : undefined
+  const [tone, label] = statusTag(embedding, t)
   return (
-    <div style={S.field} data-testid="her-memory-embedding">
+    <section style={S.card} data-testid="her-memory-embedding">
       <div style={S.between}>
-        <span style={S.secondary}>
-          <strong style={S.primary}>{t('embeddingTitle')}</strong>
-          {' · '}
-          {embedding.provider === 'off' ? t('embeddingDisabled') : embedding.provider === 'local' ? t('providerLocal', { model: local?.model ?? '' }) : t('providerRemote')}
+        <span style={S.rowText}>
+          <span style={S.row}>
+            <strong style={S.primary}>{t('embeddingTitle')}</strong>
+            <Tag tone={tone}>{label}</Tag>
+          </span>
+          <span style={S.secondary}>
+            {embedding.provider === 'off' ? t('embeddingDisabledHint') : embedding.provider === 'local' ? t('providerLocal', { model: modelName }) : t('providerRemote')}
+          </span>
         </span>
         <span style={S.row}>
-          {embedding.provider === 'local'
-            ? <Button size="sm" variant="outline" onClick={() => { setCatalogOpen(open => !open) }}>{catalogOpen ? t('hideModels') : t('showModels')}</Button>
-            : null}
           {local !== null && local.state === 'error'
-            ? <Button size="sm" variant="outline" disabled={busy} onClick={() => { void run(() => api.prepareLocalModel()).then((ok) => { if (ok) onChanged() }) }}>{t('localRetry')}</Button>
+            ? <Button size="sm" variant="primary" disabled={busy} onClick={() => { void run(() => api.prepareLocalModel()).then((ok) => { if (ok) onChanged() }) }}>{t('localRetry')}</Button>
             : null}
           {embedding.configured
             ? (
@@ -109,11 +132,11 @@ export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged }: {
             : null}
         </span>
       </div>
-      {local === null ? null : <span style={local.state === 'error' ? S.error : S.secondary} data-testid="her-memory-local-state">{localLine(local, t)}</span>}
+      {local === null ? null : <span style={local.state === 'error' ? S.error : S.caption} data-testid="her-memory-local-state">{localLine(local, t)}</span>}
       {progress === undefined
         ? null
         : (
-            <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)} aria-label={t('localProgress')} style={{ height: 4, borderRadius: 2, background: 'var(--dsw-alias-bg-layer-2)', overflow: 'hidden' }}>
+            <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)} aria-label={t('localProgress')} style={{ height: 6, borderRadius: 3, background: 'var(--dsw-alias-bg-layer-2)', overflow: 'hidden' }}>
               <div style={{ width: `${Math.round(progress * 100)}%`, height: '100%', background: 'var(--dsw-alias-state-success-primary)' }} />
             </div>
           )}
@@ -125,33 +148,43 @@ export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged }: {
               {embedding.lastError === null ? '' : ` · ${t('embeddingError', { error: embedding.lastError })}`}
             </span>
           )
-        : <span style={S.caption}>{embedding.provider === 'remote' ? t('embeddingOff') : t('embeddingDisabledHint')}</span>}
+        : embedding.provider === 'remote' ? <span style={S.caption}>{t('embeddingOff')}</span> : null}
       {test === undefined ? null : <span style={S.success}>{test}</span>}
-      {catalogOpen ? <ModelCatalog api={api} t={t} run={run} busy={busy} version={local?.downloaded ?? false} /> : null}
-    </div>
+      {embedding.provider === 'local'
+        ? (
+            <div>
+              <Button size="sm" variant="ghost" aria-expanded={catalogOpen} onClick={() => { setCatalogOpen(open => !open) }}>
+                {`${catalogOpen ? '▾' : '▸'} ${t('showModels')}`}
+              </Button>
+            </div>
+          )
+        : null}
+      {catalogOpen && embedding.provider === 'local' ? <ModelCatalog api={api} t={t} run={run} busy={busy} catalog={catalog} selectModel={selectModel} /> : null}
+    </section>
   )
 }
 
-function ModelCatalog({ api, t, run, busy, version }: {
+function ModelCatalog({ api, t, run, busy, catalog, selectModel }: {
   api: MemoryApi
   t: T
   run: (action: () => Promise<unknown>) => Promise<boolean>
   busy: boolean
-  version: unknown
+  catalog: Loaded<Awaited<ReturnType<MemoryApi['localModels']>> | undefined>
+  selectModel: (id: string) => void
 }): ReactNode {
-  const [tick, setTick] = useState(0)
-  const catalog = useLoad(() => api.localModels(), [api, version, tick])
   if (catalog.value === undefined) return <span style={S.caption}>{catalog.error ?? t('loading')}</span>
+  const { supported, models } = catalog.value
   return (
     <div style={S.field} data-testid="her-memory-models">
-      <span style={S.caption}>{catalog.value.supported ? t('modelsHint') : t('localUnsupported')}</span>
-      <ul style={S.list}>
-        {catalog.value.models.map((model: LocalModelItem) => (
-          <li key={model.id} style={S.between}>
-            <span style={S.field}>
-              <span style={S.primary}>
-                {model.name}
-                {model.selected ? ` · ${t('modelSelected')}` : ''}
+      <span style={S.caption}>{supported ? t('modelsHint') : t('localUnsupported')}</span>
+      <ul style={S.group}>
+        {models.map((model: LocalModelItem) => (
+          <li key={model.id} style={S.groupRow}>
+            <span style={S.rowText}>
+              <span style={S.row}>
+                <span style={S.primary}>{model.name}</span>
+                {model.selected ? <Tag tone="solid">{t('modelSelected')}</Tag> : null}
+                {model.downloaded ? <Tag tone="outline">{t('modelDownloaded')}</Tag> : null}
               </span>
               <span style={S.caption}>
                 {t('modelFacts', {
@@ -163,9 +196,18 @@ function ModelCatalog({ api, t, run, busy, version }: {
                 })}
               </span>
             </span>
-            {model.downloaded && !model.selected
-              ? <Button size="sm" variant="outline" disabled={busy} onClick={() => { void run(() => api.deleteLocalModel(model.id)).then(() => { setTick(n => n + 1) }) }}>{t('modelDelete')}</Button>
-              : <span style={S.caption}>{model.downloaded ? t('modelDownloaded') : t('modelNotDownloaded')}</span>}
+            {model.selected
+              ? null
+              : (
+                  <span style={S.row}>
+                    {model.downloaded
+                      ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => { void run(() => api.deleteLocalModel(model.id)).then(() => { catalog.reload() }) }}>{t('modelDelete')}</Button>
+                      : null}
+                    {supported
+                      ? <Button size="sm" variant={model.downloaded ? 'primary' : 'outline'} disabled={busy} onClick={() => { selectModel(model.id) }}>{model.downloaded ? t('modelUse') : t('modelDownloadUse')}</Button>
+                      : null}
+                  </span>
+                )}
           </li>
         ))}
       </ul>

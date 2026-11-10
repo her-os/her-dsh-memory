@@ -96,6 +96,29 @@ describe('extraction', () => {
     expect(h.engine.repo.queueLength()).toBe(1)
   })
 
+  it('extracts what another session left queued before recalling', async () => {
+    const llm = scriptedLlm(extraction([{ kind: 'profile', content: '用户养了两只猫：小黑和汉堡', importance: 2, evidence: '我有两只猫，一只叫小黑，一只叫汉堡' }]))
+    h = makeEngine({ llm })
+    h.engine.enqueueTurn('s1', turn(1, '我有两只猫，一只叫小黑，一只叫汉堡'))
+    h.engine.enqueueTurn('s1', turn(2, '小黑比较高冷，汉堡比较亲人'))
+    await h.engine.pump()
+    expect(llm.requests).toHaveLength(0)
+    // The question in s2 comes before s1's batch is due, yet its facts are recalled.
+    const result = await h.engine.recall(recallReq('小黑和汉堡最近怎么样', { sessionId: 's2' }))
+    expect(llm.requests).toHaveLength(1)
+    expect(result.text).toContain('小黑和汉堡')
+    expect(h.engine.repo.queueLength()).toBe(0)
+  })
+
+  it('leaves the recalling session\'s own queued turns for their batch', async () => {
+    const llm = scriptedLlm()
+    h = makeEngine({ llm })
+    h.engine.enqueueTurn('s1', turn(1, '我最近在学吉他'))
+    await h.engine.recall(recallReq('吉他好难'))
+    expect(llm.requests).toHaveLength(0)
+    expect(h.engine.repo.queueLength()).toBe(1)
+  })
+
   it('drops trivial turns and nothing is queued while paused', () => {
     h = makeEngine({ settings: { paused: true } })
     h.engine.enqueueTurn('s1', turn(1, '我养了一只猫'))
@@ -181,6 +204,40 @@ describe('recall', () => {
   })
 })
 
+describe('management page search', () => {
+  /** Embedder that places texts on fixed axes by the first matching key. */
+  const topicEmbedder = (topics: Record<string, number>) => ({
+    fingerprint: () => 'topic|4',
+    embed: async (texts: readonly string[]) => texts.map((text) => {
+      const v = new Float32Array(4)
+      const key = Object.keys(topics).find(k => text.includes(k))
+      v[key === undefined ? 3 : topics[key]!] = 1
+      return v
+    }),
+  })
+
+  it('ranks keyword matches by BM25 rather than by date', async () => {
+    h = makeEngine()
+    const strong = await h.engine.save({ content: '用户喜欢爬山，周末常去香山爬山', scope: 'global', pinned: false })
+    h.clock.advanceDays(1)
+    const weak = await h.engine.save({ content: '用户上周提到过爬山和游泳、跑步、骑车、滑雪这些运动', scope: 'global', pinned: false })
+    const page = await h.engine.list({ offset: 0, limit: 10, search: '香山 爬山' })
+    expect(page.items.map(m => m.id)).toEqual([strong.id, weak.id])
+    expect(page.total).toBe(2)
+  })
+
+  it('adds memories close in meaning and keeps the other filters', async () => {
+    h = makeEngine()
+    h.engine.setEmbedder(topicEmbedder({ 猫: 0, 团子: 0, 宠物: 0, 咖啡: 1 }))
+    const cat = await h.engine.save({ content: '用户养了一只叫团子的猫', scope: 'global', pinned: false })
+    const trashed = await h.engine.save({ content: '用户以前养过一只猫', scope: 'global', pinned: false })
+    await h.engine.save({ content: '用户每天喝两杯咖啡', scope: 'global', pinned: false })
+    h.engine.remove(trashed.id)
+    const page = await h.engine.list({ offset: 0, limit: 10, search: '宠物', statuses: ['active'] })
+    expect(page.items.map(m => m.id)).toEqual([cat.id])
+  })
+})
+
 describe('resident section and management', () => {
   it('lists pinned memories in the resident section, not in recall', async () => {
     h = makeEngine()
@@ -195,7 +252,7 @@ describe('resident section and management', () => {
     const fixed = await h.engine.correct(m.id, '用户住在杭州')
     expect(h.engine.repo.require(m.id).status).toBe('superseded')
     h.engine.remove(fixed.id)
-    expect(h.engine.list({ offset: 0, limit: 20, statuses: ['deleted'] }).total).toBe(1)
+    expect((await h.engine.list({ offset: 0, limit: 20, statuses: ['deleted'] })).total).toBe(1)
     h.engine.restore(fixed.id)
     expect(h.engine.repo.require(fixed.id).status).toBe('active')
     h.engine.purge(fixed.id)

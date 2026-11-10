@@ -1,6 +1,6 @@
 /**
  * Browser half of the Her memory plugin: mounts the `herMemory` Remote, then
- * contributes the memory page to this bundle's page in Plugins.
+ * contributes the memory page, settings included, to this bundle's page in Plugins.
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
@@ -8,9 +8,11 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { createMemoryApi } from './client/api.ts'
 import { MemoryTab } from './client/MemoryTab.tsx'
+import { ENTRY_ID, type SettingsValue } from './client/settings.ts'
 import { en, zh, type MemoryLocaleKey } from './client/locales.ts'
 import { TYPERT_REMOTE } from './typert/remote-client.ts'
 
@@ -39,7 +41,7 @@ export const NS = 'herMemory'
 export const BUNDLE = '@her-os/dsh-memory'
 
 /** Client services the registration uses. */
-export const inject = ['slots', 'locale', 'remote']
+export const inject = ['slots', 'locale', 'remote', 'configForms']
 
 /**
  * Mount the Remote, then register dictionaries and the memory page for the same lifetime.
@@ -55,11 +57,12 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
 
 function register(ctx: ClientContext): void {
   const api = createMemoryApi((op, payload) => ctx.remote.herMemory.call(op, payload))
+  const settings = ctx.configForms.get<SettingsValue>(ENTRY_ID)
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'her-memory: dictionaries')
   ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
     name: 'plugins.bundle.config',
     key: BUNDLE,
     locale: NS,
-    inject: () => ({ api }),
+    inject: () => ({ api, settings }),
   }, MemoryTab))
 }
