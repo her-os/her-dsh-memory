@@ -135,3 +135,16 @@ describe('proactive', () => {
     expect(pickOffer([old], () => [], 'normal', today, now)?.reason).toBe('reminisce')
   })
 })
+
+describe('worker scan', () => {
+  it('returns the same hits as the in-thread scan', async () => {
+    const { WORKER_MIN_ROWS } = await import('../src/index.ts')
+    const index = new VectorIndex(8)
+    let seed = 7
+    const rnd = () => { seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31; return seed / 2 ** 31 - 0.5 }
+    for (let id = 1; id <= WORKER_MIN_ROWS + 10; id++) index.upsert(id, Float32Array.from({ length: 8 }, rnd))
+    const query = Float32Array.from({ length: 8 }, rnd)
+    const viaWorker = await index.searchAsync(query, 10)
+    expect(viaWorker.map(hit => hit.id)).toEqual(index.search(query, 10).map(hit => hit.id))
+  })
+})

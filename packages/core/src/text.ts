@@ -25,13 +25,28 @@ export function ftsText(text: string): string {
 }
 
 /**
+ * Function words, pronouns, and fillers left out of keyword queries; they
+ * match most memories and only cost time. "用户" is here because every memory
+ * is written in the third person about the user.
+ */
+export const STOPWORDS: ReadonlySet<string> = new Set([
+  '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们', '咱们', '自己', '用户', '的', '了', '着', '过', '是', '在', '有', '和', '与', '或',
+  '就', '也', '都', '还', '又', '很', '太', '挺', '最', '更', '把', '被', '给', '让', '从', '向', '对', '跟', '这', '那', '这个', '那个', '这些',
+  '那些', '什么', '怎么', '怎么样', '为什么', '哪', '哪里', '吗', '呢', '吧', '啊', '呀', '哦', '嗯', '哈', '啦', '么', '一下', '一个', '一些',
+  '没', '没有', '不', '要', '会', '能', '可以', '想', '说', '看', '觉得', '知道', '现在', '今天', '最近', '然后', '但是', '因为', '所以', '如果',
+  'the', 'a', 'an', 'is', 'are', 'i', 'you', 'to', 'of', 'and', 'it', 'my', 'me',
+])
+
+/**
  * An FTS5 MATCH expression that matches any token of the query; every token is
  * quoted, so FTS5 operators in user text have no effect.
  * @param text - the user message or search text.
  * @returns the expression, or `undefined` when the text has no word tokens.
  */
 export function ftsQuery(text: string): string | undefined {
-  const unique = [...new Set(tokenize(text))]
+  const all = [...new Set(tokenize(text))]
+  const meaningful = all.filter(token => !STOPWORDS.has(token))
+  const unique = meaningful.length > 0 ? meaningful : all
   if (unique.length === 0) return undefined
   return unique.map(token => `"${token.replaceAll('"', '""')}"`).join(' OR ')
 }

@@ -65,16 +65,20 @@ export interface VectorHit {
 
 /** Quantized brute-force index keyed by memory id. */
 export class VectorIndex {
-  private ids = new Int32Array(0)
-  private data = new Int8Array(0)
-  private scales = new Float32Array(0)
+  private ids = new Int32Array(new SharedArrayBuffer(0))
+  private data = new Int8Array(new SharedArrayBuffer(0))
+  private scales = new Float32Array(new SharedArrayBuffer(0))
   private readonly rowOf = new Map<number, number>()
   private count = 0
+
+  readonly dim: number
 
   /**
    * @param dim - vector dimension every row must have.
    */
-  constructor(readonly dim: number) {}
+  constructor(dim: number) {
+    this.dim = dim
+  }
 
   /** Number of rows. */
   get size(): number {
@@ -153,25 +157,24 @@ export class VectorIndex {
    */
   search(query: Float32Array, k: number, accept?: (id: number) => boolean): VectorHit[] {
     if (query.length !== this.dim || k <= 0) return []
-    const unit = normalize(query)
-    const top: VectorHit[] = []
-    for (let row = 0; row < this.count; row++) {
-      const id = this.ids[row]!
-      if (accept !== undefined && !accept(id)) continue
-      const score = this.dot(row, unit)
-      if (top.length < k) {
-        top.push({ id, score })
-        if (top.length === k) top.sort((a, b) => b.score - a.score)
-      } else if (score > top[k - 1]!.score) {
-        let i = k - 1
-        while (i > 0 && top[i - 1]!.score < score) {
-          top[i] = top[i - 1]!
-          i--
-        }
-        top[i] = { id, score }
-      }
-    }
-    return top.length < k ? top.sort((a, b) => b.score - a.score) : top
+    const { q, queryScale } = quantizeQuery(query)
+    return scanTop(this.data, this.scales, this.ids, this.dim, 0, this.count, q, queryScale, k, accept)
+  }
+
+  /**
+   * {@link search} off the main thread once the index holds
+   * {@link WORKER_MIN_ROWS} rows, so a long scan never stalls the event loop.
+   * Rows written during the scan may be seen old or new.
+   * @param query - query vector of length {@link dim}.
+   * @param k - result count.
+   * @returns hits sorted by descending cosine similarity.
+   */
+  async searchAsync(query: Float32Array, k: number): Promise<VectorHit[]> {
+    if (this.count < WORKER_MIN_ROWS || query.length !== this.dim || k <= 0) return this.search(query, k)
+    const { q, queryScale } = quantizeQuery(query)
+    const worker = scanWorker()
+    if (worker === undefined) return this.search(query, k)
+    return worker.scan({ data: this.data, scales: this.scales, ids: this.ids, dim: this.dim, count: this.count, q, queryScale, k })
   }
 
   private dot(row: number, unit: Float32Array): number {
@@ -184,11 +187,11 @@ export class VectorIndex {
   private grow(rows: number): void {
     if (rows <= this.ids.length) return
     const capacity = Math.max(rows, this.ids.length * 2, 64)
-    const ids = new Int32Array(capacity)
+    const ids = new Int32Array(new SharedArrayBuffer(capacity * 4))
     ids.set(this.ids)
-    const data = new Int8Array(capacity * this.dim)
+    const data = new Int8Array(new SharedArrayBuffer(capacity * this.dim))
     data.set(this.data)
-    const scales = new Float32Array(capacity)
+    const scales = new Float32Array(new SharedArrayBuffer(capacity * 4))
     scales.set(this.scales)
     this.ids = ids
     this.data = data
@@ -208,4 +211,125 @@ export function reciprocalRankFusion(lists: readonly (readonly number[])[], k = 
     list.forEach((id, rank) => scores.set(id, (scores.get(id) ?? 0) + 1 / (k + rank + 1)))
   }
   return scores
+}
+
+/** Row count from which {@link VectorIndex.searchAsync} scans in a worker thread. */
+export const WORKER_MIN_ROWS = 20_000
+
+const quantizeQuery = (query: Float32Array): { q: Int32Array; queryScale: number } => {
+  const unit = normalize(query)
+  let max = 0
+  for (let i = 0; i < unit.length; i++) max = Math.max(max, Math.abs(unit[i]!))
+  const queryScale = max === 0 ? 1 : 127 / max
+  const q = new Int32Array(unit.length)
+  for (let i = 0; i < unit.length; i++) q[i] = Math.round(unit[i]! * queryScale)
+  return { q, queryScale }
+}
+
+/**
+ * Integer dot-product scan keeping the `k` best rows. Self-contained: its
+ * source is also run inside the worker.
+ */
+function scanTop(data: Int8Array, scales: Float32Array, ids: Int32Array, dim: number, from: number, to: number, q: Int32Array, queryScale: number, k: number, accept?: (id: number) => boolean): VectorHit[] {
+  const tail = dim - (dim % 4)
+  const top: VectorHit[] = []
+  let floor = -Infinity
+  for (let row = from; row < to; row++) {
+    const id = ids[row]!
+    if (accept !== undefined && !accept(id)) continue
+    const offset = row * dim
+    let s0 = 0
+    let s1 = 0
+    let s2 = 0
+    let s3 = 0
+    let i = 0
+    for (; i < tail; i += 4) {
+      s0 = (s0 + data[offset + i]! * q[i]!) | 0
+      s1 = (s1 + data[offset + i + 1]! * q[i + 1]!) | 0
+      s2 = (s2 + data[offset + i + 2]! * q[i + 2]!) | 0
+      s3 = (s3 + data[offset + i + 3]! * q[i + 3]!) | 0
+    }
+    for (; i < dim; i++) s0 = (s0 + data[offset + i]! * q[i]!) | 0
+    const score = (s0 + s1 + s2 + s3) / (scales[row]! * queryScale)
+    if (top.length < k) {
+      top.push({ id, score })
+      if (top.length === k) {
+        top.sort((a, b) => b.score - a.score)
+        floor = top[k - 1]!.score
+      }
+    } else if (score > floor) {
+      let j = k - 1
+      while (j > 0 && top[j - 1]!.score < score) {
+        top[j] = top[j - 1]!
+        j--
+      }
+      top[j] = { id, score }
+      floor = top[k - 1]!.score
+    }
+  }
+  return top.length < k ? top.sort((a, b) => b.score - a.score) : top
+}
+
+interface ScanRequest {
+  readonly data: Int8Array
+  readonly scales: Float32Array
+  readonly ids: Int32Array
+  readonly dim: number
+  readonly count: number
+  readonly q: Int32Array
+  readonly queryScale: number
+  readonly k: number
+}
+
+interface ScanWorker {
+  scan(request: ScanRequest): Promise<VectorHit[]>
+}
+
+let sharedWorker: ScanWorker | null | undefined
+
+/**
+ * The process-wide scan worker, started on first use and unref'd so it never
+ * keeps the process alive. `undefined` when worker threads are unavailable.
+ */
+const scanWorker = (): ScanWorker | undefined => {
+  if (sharedWorker !== undefined) return sharedWorker ?? undefined
+  try {
+    const { Worker } = process.getBuiltinModule('node:worker_threads')
+    const source = `const scanTop = ${scanTop.toString()}
+const { parentPort } = require('node:worker_threads')
+parentPort.on('message', ({ id, r }) => {
+  try { parentPort.postMessage({ id, hits: scanTop(r.data, r.scales, r.ids, r.dim, 0, r.count, r.q, r.queryScale, r.k) }) }
+  catch (error) { parentPort.postMessage({ id, error: String(error) }) }
+})`
+    const worker = new Worker(source, { eval: true })
+    worker.unref()
+    const pending = new Map<number, { resolve: (hits: VectorHit[]) => void; reject: (error: Error) => void }>()
+    let next = 0
+    worker.on('message', (message: { id: number; hits?: VectorHit[]; error?: string }) => {
+      const waiter = pending.get(message.id)
+      pending.delete(message.id)
+      if (pending.size === 0) worker.unref()
+      if (message.error !== undefined) waiter?.reject(new Error(message.error))
+      else waiter?.resolve(message.hits ?? [])
+    })
+    const fail = (error: unknown): void => {
+      sharedWorker = null
+      for (const waiter of pending.values()) waiter.reject(error instanceof Error ? error : new Error(String(error)))
+      pending.clear()
+    }
+    worker.on('error', fail)
+    worker.on('exit', () => fail(new Error('vector scan worker exited')))
+    sharedWorker = {
+      scan: request => new Promise((resolve, reject) => {
+        const id = next++
+        pending.set(id, { resolve, reject })
+        worker.ref()
+        worker.postMessage({ id, r: request })
+      }),
+    }
+    return sharedWorker
+  } catch {
+    sharedWorker = null
+    return undefined
+  }
 }

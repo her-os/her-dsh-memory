@@ -3,5 +3,11 @@
   "version": "0.0.0",
   "description": "Evaluation sets and benchmarks for Her memory",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "bench": "node src/bench.ts"
+  },
+  "dependencies": {
+    "@her-os/memory-core": "workspace:*"
+  }
 }

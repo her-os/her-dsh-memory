@@ -10,12 +10,12 @@ import { setImmediate as yieldToLoop } from 'node:timers/promises'
 import { type Embedder, embedWithin } from './embed.ts'
 import { buildExtractInput, type Candidate, checkCandidate, isSkippableTurn, jaccard, parseExtraction, PROBLEM_TEXT, type TurnPayload } from './extract.ts'
 import { currentStrength, decayedStatus, isDecayExempt, MAX_STRENGTH, REINFORCE_STEP } from './lifecycle.ts'
-import { type Offer, pickOffer, type ProactiveLevel, shouldOffer } from './proactive.ts'
+import { FOLLOW_UP_WINDOW_DAYS, type Offer, pickOffer, type ProactiveLevel, REMINISCE_MIN_AGE_DAYS, shouldOffer } from './proactive.ts'
 import type { PromptPack } from './prompts.ts'
 import { renderLine, renderProactiveBlock, renderRecallBlock, type Scored, selectRecall } from './recall.ts'
 import { type ListQuery, MemoryRepo, type RecallLogEntry } from './repo.ts'
 import { escapeForPrompt, looksLikeSecret, tokenize } from './text.ts'
-import { calendarDay, type Clock, formatDate, resolveDate, weekdayOf } from './time.ts'
+import { addDays, calendarDay, type Clock, formatDate, resolveDate, weekdayOf } from './time.ts'
 import type { Logger, Memory, MemoryKind, MemoryPatch, MemoryStatus } from './types.ts'
 import { cosine, reciprocalRankFusion, VectorIndex } from './vector.ts'
 
@@ -54,8 +54,8 @@ export interface MemoryPorts {
 /** Candidates scanned per retrieval path. */
 export const RETRIEVAL_DEPTH = 30
 
-/** Recall time budget, excluding the query embedding request; over budget the next turn skips vectors. */
-export const RECALL_BUDGET_MS = 50
+/** Recall time budget, excluding the query embedding request; over budget the next turn skips vectors. Matches the 50k-memory target. */
+export const RECALL_BUDGET_MS = 100
 
 /** Embedding batch size for writes and backfill. */
 export const EMBED_BATCH = 32
@@ -172,10 +172,13 @@ export class MemoryEngine {
   private version = 0
   private disposed = false
 
+  private readonly ports: MemoryPorts
+
   /**
    * @param ports - host dependencies.
    */
-  constructor(private readonly ports: MemoryPorts) {
+  constructor(ports: MemoryPorts) {
+    this.ports = ports
     this.repo = new MemoryRepo(ports.db)
   }
 
@@ -360,7 +363,14 @@ export class MemoryEngine {
     const keywordIds = this.repo.keywordSearch(request.userText, RETRIEVAL_DEPTH, RECALL_STATUSES, request.scopes)
     const index = query === undefined ? undefined : this.vectorIndex()
     const usable = index !== undefined && query !== undefined && query.length === index.dim
-    const vectorHits = usable ? index.search(query, RETRIEVAL_DEPTH) : []
+    let vectorHits: readonly { id: number; score: number }[] = []
+    if (usable) {
+      try {
+        vectorHits = await index.searchAsync(query, RETRIEVAL_DEPTH)
+      } catch (error) {
+        this.ports.logger.warn('vector search failed; keywords only: %s', error instanceof Error ? error.message : String(error))
+      }
+    }
     const similarities = new Map(vectorHits.map(hit => [hit.id, hit.score]))
     const fused = reciprocalRankFusion([keywordIds, vectorHits.map(hit => hit.id)])
     const memories = this.repo.getMany([...fused.keys()])
@@ -379,7 +389,9 @@ export class MemoryEngine {
 
     let offer: Offer | undefined
     if (shouldOffer(settings.proactive, request.firstTurn, lastTurnAt, request.offeredThisSession, now)) {
-      const pool = this.repo.byStatus(RECALL_STATUSES).filter(m => request.scopes.includes(m.scope) && !chosen.some(c => c.memory.id === m.id))
+      const reminisceBefore = settings.proactive === 'normal' ? new Date(now.getTime() - REMINISCE_MIN_AGE_DAYS * 86_400_000).toISOString() : null
+      const pool = this.repo.proactivePool(request.scopes, formatDate(addDays(today, -FOLLOW_UP_WINDOW_DAYS)), formatDate(today), reminisceBefore)
+        .filter(m => !chosen.some(c => c.memory.id === m.id))
       offer = pickOffer(pool, id => this.repo.mentionsOf(id), settings.proactive, today, now)
       if (offer !== undefined) parts.push(renderProactiveBlock(lineOf(offer.memory, false), this.ports.prompts))
     }
@@ -410,9 +422,7 @@ export class MemoryEngine {
   residentSection(scopes: readonly string[], limit = 400): string {
     const key = scopes.join('\n')
     if (this.residentCache?.version === this.version && this.residentCache.scopes === key) return this.residentCache.text
-    const pool = this.repo.byStatus(RECALL_STATUSES)
-      .filter(m => scopes.includes(m.scope) && !m.sensitive && !m.mentionBlocked && (m.pinned || (m.kind === 'profile' && m.importance >= 3)))
-      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.id - b.id)
+    const pool = this.repo.residentPool(scopes, 50)
     const lines: string[] = []
     let used = 0
     for (const memory of pool) {
@@ -654,7 +664,7 @@ export class MemoryEngine {
     const keywordIds = this.repo.keywordSearch(text, RETRIEVAL_DEPTH, SEARCH_STATUSES, scopes)
     const query = await this.embedOne(text, this.ports.settings().embeddingTimeoutMs)
     const index = query === undefined ? undefined : this.vectorIndex()
-    const vectorIds = index !== undefined && query !== undefined && query.length === index.dim ? index.search(query, RETRIEVAL_DEPTH).map(hit => hit.id) : []
+    const vectorIds = index !== undefined && query !== undefined && query.length === index.dim ? (await index.searchAsync(query, RETRIEVAL_DEPTH)).map(hit => hit.id) : []
     const fused = [...reciprocalRankFusion([keywordIds, vectorIds]).entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id)
     const memories = this.repo.getMany(fused)
     return fused.flatMap(id => {

@@ -59,7 +59,11 @@ importers:
         specifier: ^0.22.2
         version: 0.22.14(typescript@6.0.3)
 
-  packages/eval: {}
+  packages/eval:
+    dependencies:
+      '@her-os/memory-core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 

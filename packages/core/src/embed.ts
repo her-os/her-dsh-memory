@@ -27,12 +27,15 @@ export interface EmbeddingSettings {
 
 /** A non-2xx response or malformed body from the endpoint. */
 export class EmbeddingError extends Error {
+  readonly status: number | undefined
+
   /**
    * @param message - what went wrong, without request text.
    * @param status - HTTP status, when any.
    */
-  constructor(message: string, readonly status?: number) {
+  constructor(message: string, status?: number) {
     super(message)
+    this.status = status
     this.name = 'EmbeddingError'
   }
 }
@@ -73,12 +76,15 @@ export function openAICompatibleEmbedder(settings: EmbeddingSettings, fetchImpl:
 
 /** Raised when an embedding call exceeds its time limit. */
 export class EmbeddingTimeoutError extends Error {
+  readonly ms: number
+
   /**
    * @param ms - the limit that elapsed.
    */
-  constructor(readonly ms: number) {
+  constructor(ms: number) {
     super(`embedding request exceeded ${ms} ms`)
     this.name = 'EmbeddingTimeoutError'
+    this.ms = ms
   }
 }
 

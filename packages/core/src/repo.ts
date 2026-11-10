@@ -106,10 +106,14 @@ export interface ProactiveEntry {
 
 /** Typed access to one open memory database. */
 export class MemoryRepo {
+  readonly db: DatabaseSync
+
   /**
    * @param db - an open, migrated connection.
    */
-  constructor(readonly db: DatabaseSync) {}
+  constructor(db: DatabaseSync) {
+    this.db = db
+  }
 
   /**
    * Run `fn` inside one immediate transaction.
@@ -368,6 +372,40 @@ export class MemoryRepo {
    */
   byStatus(statuses: readonly MemoryStatus[]): Memory[] {
     return (this.db.prepare(`SELECT * FROM memories WHERE status IN (${statuses.map(() => '?').join(',')})`).all(...statuses) as Row[]).map(toMemory)
+  }
+
+  /**
+   * Proactive-mention candidates: dated follow-ups, open promises, and (when
+   * `reminisce`) a bounded sample of older important events.
+   * @param scopes - visible scopes.
+   * @param fromDate - earliest follow-up date, `YYYY-MM-DD`.
+   * @param toDate - latest follow-up date, `YYYY-MM-DD`.
+   * @param reminisceBefore - ISO instant; older events qualify, or `null` to skip them.
+   * @returns the candidates, at most a few hundred.
+   */
+  proactivePool(scopes: readonly string[], fromDate: string, toDate: string, reminisceBefore: string | null): Memory[] {
+    const inScopes = scopes.map(() => '?').join(',')
+    const base = `status IN ('active','faded') AND sensitive = 0 AND mention_blocked = 0 AND scope IN (${inScopes})`
+    const rows = this.db.prepare(`SELECT * FROM memories WHERE ${base} AND follow_up_at BETWEEN ? AND ?
+      UNION SELECT * FROM memories WHERE ${base} AND kind = 'promise' AND follow_up_at IS NULL
+      LIMIT 200`).all(...scopes, fromDate, toDate, ...scopes) as Row[]
+    if (reminisceBefore !== null) {
+      rows.push(...this.db.prepare(`SELECT * FROM memories WHERE ${base} AND kind IN ('event','shared') AND importance >= 2
+        AND follow_up_at IS NULL AND learned_at < ? ORDER BY importance DESC, strength DESC LIMIT 100`).all(...scopes, reminisceBefore) as Row[])
+    }
+    return rows.map(toMemory)
+  }
+
+  /**
+   * Memories eligible for the resident system-prompt section.
+   * @param scopes - visible scopes.
+   * @param limit - row cap.
+   * @returns pinned memories first, then high-importance profile memories, oldest first.
+   */
+  residentPool(scopes: readonly string[], limit: number): Memory[] {
+    return (this.db.prepare(`SELECT * FROM memories WHERE status IN ('active','faded') AND sensitive = 0 AND mention_blocked = 0
+      AND scope IN (${scopes.map(() => '?').join(',')}) AND (pinned = 1 OR (kind = 'profile' AND importance >= 3))
+      ORDER BY pinned DESC, id LIMIT ?`).all(...scopes, limit) as Row[]).map(toMemory)
   }
 
   /**
