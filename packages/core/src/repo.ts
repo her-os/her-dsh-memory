@@ -63,7 +63,12 @@ export interface ListQuery {
   readonly pinned?: boolean
   readonly search?: string
   readonly scopes?: readonly string[]
+  /** Only these memory ids. */
+  readonly ids?: readonly number[]
 }
+
+/** Filters of a {@link ListQuery} without its page window. */
+export type ListFilter = Omit<ListQuery, 'offset' | 'limit'>
 
 /** One queued extraction unit. */
 export interface QueueItem {
@@ -282,6 +287,37 @@ export class MemoryRepo {
    * @returns the page and the total match count.
    */
   list(query: ListQuery): { items: Memory[]; total: number } {
+    const filter = this.filterSql(query)
+    if (filter === undefined) return { items: [], total: 0 }
+    const { clause, args } = filter
+    const total = Number((this.db.prepare(`SELECT count(*) AS n FROM memories m ${clause}`).get(...args) as Row).n)
+    const rows = this.db.prepare(`SELECT m.* FROM memories m ${clause} ORDER BY m.pinned DESC, m.learned_at DESC, m.id DESC LIMIT ? OFFSET ?`)
+      .all(...args, query.limit, query.offset) as Row[]
+    return { items: rows.map(toMemory), total }
+  }
+
+  /**
+   * Ids of every memory that passes the filters. With a search text, best
+   * keyword match (BM25) first; otherwise in page order.
+   * @param filter - list filters.
+   * @returns matching ids.
+   */
+  listIds(filter: ListFilter): number[] {
+    const { search, ...rest } = filter
+    const match = search === undefined || search.trim() === '' ? undefined : ftsQuery(search)
+    if (search !== undefined && search.trim() !== '' && match === undefined) return []
+    const sql = this.filterSql(rest)
+    if (sql === undefined) return []
+    const rows = match === undefined
+      ? this.db.prepare(`SELECT m.id AS id FROM memories m ${sql.clause} ORDER BY m.pinned DESC, m.learned_at DESC, m.id DESC`).all(...sql.args) as Row[]
+      : this.db.prepare(`SELECT m.id AS id FROM memory_fts f JOIN memories m ON m.id = f.rowid
+          WHERE memory_fts MATCH ?${sql.clause === '' ? '' : ` AND ${sql.clause.slice('WHERE '.length)}`}
+          ORDER BY bm25(memory_fts), m.id DESC`).all(match, ...sql.args) as Row[]
+    return rows.map(row => Number(row.id))
+  }
+
+  /** WHERE clause of the list filters; `undefined` when nothing can match. */
+  private filterSql(query: ListFilter): { clause: string; args: SQLInputValue[] } | undefined {
     const where: string[] = []
     const args: SQLInputValue[] = []
     if (query.kind !== undefined) { where.push('m.kind = ?'); args.push(query.kind) }
@@ -295,21 +331,22 @@ export class MemoryRepo {
       where.push(`m.scope IN (${query.scopes.map(() => '?').join(',')})`)
       args.push(...query.scopes)
     }
+    if (query.ids !== undefined) {
+      if (query.ids.length === 0) return undefined
+      where.push(`m.id IN (${query.ids.map(() => '?').join(',')})`)
+      args.push(...query.ids)
+    }
     if (query.person !== undefined) {
       where.push('m.id IN (SELECT mp.memory_id FROM memory_people mp JOIN people p ON p.id = mp.person_id WHERE p.name = ?)')
       args.push(query.person)
     }
     if (query.search !== undefined && query.search.trim() !== '') {
       const match = ftsQuery(query.search)
-      if (match === undefined) return { items: [], total: 0 }
+      if (match === undefined) return undefined
       where.push('m.id IN (SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?)')
       args.push(match)
     }
-    const clause = where.length === 0 ? '' : `WHERE ${where.join(' AND ')}`
-    const total = Number((this.db.prepare(`SELECT count(*) AS n FROM memories m ${clause}`).get(...args) as Row).n)
-    const rows = this.db.prepare(`SELECT m.* FROM memories m ${clause} ORDER BY m.pinned DESC, m.learned_at DESC, m.id DESC LIMIT ? OFFSET ?`)
-      .all(...args, query.limit, query.offset) as Row[]
-    return { items: rows.map(toMemory), total }
+    return { clause: where.length === 0 ? '' : `WHERE ${where.join(' AND ')}`, args }
   }
 
   /**

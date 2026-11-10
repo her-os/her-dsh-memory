@@ -54,6 +54,7 @@ export const scriptedLlm = (...replies: string[]): LlmPort & { requests: { syste
 
 export const defaultSettings: EngineSettings = {
   paused: false, recallCount: 5, injectBudget: 800, embeddingTimeoutMs: 1500, proactive: 'low', dailyExtractLimit: 200,
+  extractBatchTurns: 3, extractIdleMs: 300_000, extractBeforeRecall: true,
 }
 
 export interface Harness { engine: MemoryEngine; db: DatabaseSync; clock: TestClock; settings: EngineSettings; dispose(): void }

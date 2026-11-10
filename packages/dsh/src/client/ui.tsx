@@ -1,6 +1,6 @@
 /** Small shared pieces of the memory page: styles, async state, confirmation. */
 
-import { Button, Modal, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Translate } from '@deepseek-ai/dsh-client-ui-slots'
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import type { MemoryLocaleKey } from './locales.ts'
@@ -19,7 +19,7 @@ export const S = {
   },
   primary: { color: 'var(--dsw-alias-label-primary)' },
   secondary: { color: 'var(--dsw-alias-label-secondary)' },
-  caption: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 'var(--dsw-font-xxs-12)' },
+  caption: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 'var(--dsw-font-xxs-12-font-size, 12px)', lineHeight: 1.5 },
   error: { color: 'var(--dsw-alias-state-error-primary)' },
   success: { color: 'var(--dsw-alias-state-success-primary)' },
   field: { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 },
@@ -29,10 +29,32 @@ export const S = {
     border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 'var(--dsw-radius-sm)',
   },
   select: {
-    font: 'inherit', padding: '4px 8px', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-2)',
-    border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 'var(--dsw-radius-sm)',
+    font: 'inherit', height: 32, boxSizing: 'border-box', padding: '0 8px', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)',
+    // Same box as the Input primitive, so selects and inputs line up in a row.
+    border: '0.5px solid var(--dsw-alias-border-l4)', borderRadius: 'var(--dsw-radius-md)',
   },
   list: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 },
+  /** Heading above a group of rows. */
+  heading: { margin: '4px 2px 0', fontSize: 'var(--dsw-font-xs-13-font-size, 13px)', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' },
+  /** Bordered container of rows; the 1px gap over the border colour draws the hairlines between rows. */
+  group: {
+    border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 'var(--dsw-radius-md)', overflow: 'hidden',
+    background: 'var(--dsw-alias-border-l2)', display: 'flex', flexDirection: 'column', gap: 1, listStyle: 'none', margin: 0, padding: 0,
+    // Inside a height-capped scroll column, the hidden overflow would otherwise let it shrink to a hairline.
+    flexShrink: 0,
+  },
+  /** One row of a group: text on the left, controls on the right. */
+  groupRow: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '12px 14px', flexWrap: 'wrap', minWidth: 0,
+    background: 'var(--dsw-alias-bg-layer-1)',
+  },
+  /** Text side of a group row. */
+  rowText: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: '1 1 260px' },
+  /** Control side of a settings row. */
+  control: { flex: '0 1 280px', minWidth: 160, display: 'flex', flexDirection: 'column', gap: 4 },
+  stats: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: 8 },
+  stat: { background: 'var(--dsw-alias-fill-l1)', borderRadius: 'var(--dsw-radius-sm)', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 2 },
+  statValue: { fontSize: 20, fontWeight: 600, lineHeight: 1.2, color: 'var(--dsw-alias-label-primary)', fontVariantNumeric: 'tabular-nums' },
 } satisfies Record<string, CSSProperties>
 
 /** Async load state of one view. */
@@ -161,16 +183,3 @@ export const when = (iso: string): string => {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-/**
- * Switch with its label shown beside it; the primitive only names itself for assistive technology.
- * @param props - state, change callback, label and disabled flag.
- * @returns the labelled switch.
- */
-export function LabeledSwitch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean }): ReactNode {
-  return (
-    <span style={{ ...S.row, gap: 6 }}>
-      <Switch checked={checked} onChange={onChange} label={label} disabled={disabled} />
-      <span aria-hidden="true" style={S.secondary}>{label}</span>
-    </span>
-  )
-}

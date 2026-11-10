@@ -67,6 +67,8 @@ describe.runIf(process.env.HER_MEMORY_E2E_LOCAL === '1')('her-memory local embed
     const catalog = page.getByTestId('her-memory-models')
     await expect.poll(async () => await catalog.textContent()).toContain('EmbeddingGemma')
     expect(await catalog.textContent()).toContain('使用中')
+    // Other models are switched to from the page itself; DSH draws no settings form next to it.
+    expect(await catalog.getByRole('button', { name: /^(下载并)?使用$/u }).count()).toBeGreaterThan(0)
   })
 
   it('embeds learned memories and recalls them by meaning', { timeout: 300_000 }, async () => {

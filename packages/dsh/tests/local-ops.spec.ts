@@ -17,7 +17,7 @@ const setup = () => {
     db, prompts: DEFAULT_PROMPTS, logger: silentLogger,
     clock: { now: () => new Date('2026-11-10T02:00:00Z'), timeZone: 'Asia/Shanghai', dayStartHour: 4 },
     llm: { complete: async () => '{"memories":[],"proactive":[]}' },
-    settings: () => ({ paused: false, recallCount: 5, injectBudget: 800, embeddingTimeoutMs: 1500, proactive: 'low', dailyExtractLimit: 200 }),
+    settings: () => ({ paused: false, recallCount: 5, injectBudget: 800, embeddingTimeoutMs: 1500, proactive: 'low', dailyExtractLimit: 200, extractBatchTurns: 3, extractIdleMs: 300_000, extractBeforeRecall: true }),
   })
   const root = join(dir, 'embedding')
   // A fetch that never answers, so nothing leaves the machine.

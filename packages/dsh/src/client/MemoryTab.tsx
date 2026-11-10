@@ -1,22 +1,26 @@
 /**
  * Memory management page on this bundle's page in Plugins: an overview with
- * the pause switch, then memories, people, forgotten items, trash, and the
- * semantic-search index.
+ * the pause switch and the semantic-search index, the settings, then
+ * memories, people, forgotten items, and trash.
  */
 
-import { Button, Input, SegmentedControl, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, SegmentedControl, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { type ReactNode, useCallback, useId, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useId, useState } from 'react'
 import type { MemoryApi, PersonItem } from './api.ts'
 import { EmbeddingPanel, embeddingBusy, usePoll } from './EmbeddingPanel.tsx'
 import { MemoryDetail } from './MemoryDetail.tsx'
 import { MemoryList } from './MemoryList.tsx'
+import { type SettingValue, type SettingsForm, useSettings } from './settings.ts'
+import { SettingsPanel } from './SettingsPanel.tsx'
 import { splitList } from './draft.ts'
 import { type ConfirmRequest, ConfirmDialog, LoadError, S, type T, useAction, useLoad, when } from './ui.tsx'
 
 /** What the registration injects. */
 export interface MemoryTabInjected {
   readonly api: MemoryApi
+  /** DSH config form of this plugin's settings. */
+  readonly settings: SettingsForm
 }
 
 /** Props assembled by the Plugins page slot renderer. */
@@ -29,7 +33,7 @@ type View = 'memories' | 'people' | 'suppressions' | 'trash'
  * @param props - slot runtime props, the translator and the injected api.
  * @returns the page content.
  */
-export function MemoryTab({ t, api }: MemoryTabProps): ReactNode {
+export function MemoryTab({ t, api, settings: form }: MemoryTabProps): ReactNode {
   const id = useId()
   const [view, setView] = useState<View>('memories')
   const [person, setPerson] = useState<string | undefined>()
@@ -39,6 +43,13 @@ export function MemoryTab({ t, api }: MemoryTabProps): ReactNode {
   const { run, failure, busy } = useAction()
   const changed = useCallback(() => { setVersion(n => n + 1) }, [])
   const overview = useLoad(() => api.overview(), [api, version])
+  const settings = useSettings(form)
+  // A settings write reloads the Host plugin; show its new state once the revision moves.
+  const revision = settings.snapshot.revision
+  useEffect(() => { if (revision !== undefined) changed() }, [revision, changed])
+  const save = useCallback((path: readonly string[], value: SettingValue): void => {
+    void run(async () => { if (!await settings.set(path, value)) throw new Error(t('settingsRejected')) })
+  }, [run, settings, t])
 
   const showPerson = (name: string): void => {
     setPerson(name)
@@ -47,8 +58,9 @@ export function MemoryTab({ t, api }: MemoryTabProps): ReactNode {
 
   return (
     <div style={S.page}>
-      <Overview api={api} t={t} overview={overview} run={run} busy={busy} onChanged={changed} />
+      <Overview api={api} t={t} overview={overview} run={run} busy={busy} onChanged={changed} selectModel={(id) => { save(['embedding', 'localModel'], id) }} />
       {failure === undefined ? null : <span style={S.error}>{t('actionFailed', { error: failure })}</span>}
+      <SettingsPanel settings={settings} t={t} busy={busy} save={save} />
       <SegmentedControl<View>
         id={`${id}-view`}
         label={t('tab')}
@@ -71,38 +83,57 @@ export function MemoryTab({ t, api }: MemoryTabProps): ReactNode {
   )
 }
 
-function Overview({ api, t, overview, run, busy, onChanged }: {
+function Overview({ api, t, overview, run, busy, onChanged, selectModel }: {
   api: MemoryApi
   t: T
   overview: ReturnType<typeof useLoad<Awaited<ReturnType<MemoryApi['overview']>>>>
   run: (action: () => Promise<unknown>) => Promise<boolean>
   busy: boolean
   onChanged: () => void
+  selectModel: (id: string) => void
 }): ReactNode {
   usePoll(overview.value !== undefined && embeddingBusy(overview.value.embedding), overview.reload)
   if (overview.error !== undefined && overview.value === undefined) return <LoadError error={overview.error} retry={overview.reload} t={t} />
   const value = overview.value
   if (value === undefined) return <p style={S.secondary}>{t('loading')}</p>
   const { counts, embedding } = value
+  const stats = [
+    ['active', t('statActive'), counts.active],
+    ['faded', t('statFaded'), counts.faded],
+    ['archived', t('statArchived'), counts.archived],
+    ['deleted', t('statDeleted'), counts.deleted],
+  ] as const
   return (
-    <div style={S.card}>
-      <div style={S.between}>
-        <strong style={S.primary}>{value.paused ? t('paused') : t('enabled')}</strong>
-        <Switch
-          checked={!value.paused}
-          label={t('pauseSwitch')}
-          disabled={busy}
-          onChange={(on) => { void run(() => api.setPaused(!on)).then((ok) => { if (ok) onChanged() }) }}
-        />
-      </div>
-      <span style={S.caption}>{t('pauseHint')}</span>
-      {value.extractError === null ? null : <span style={S.error}>{t('extractError', { time: when(value.extractError.at), error: value.extractError.message })}</span>}
-      <span style={S.secondary}>
-        {t('countLine', { active: counts.active, faded: counts.faded, archived: counts.archived, deleted: counts.deleted })}
-        {value.queue > 0 ? ` · ${t('queueLine', { count: value.queue })}` : ''}
-      </span>
-      <EmbeddingPanel api={api} t={t} embedding={embedding} run={run} busy={busy} onChanged={onChanged} />
-    </div>
+    <>
+      <section style={S.card}>
+        <div style={S.between}>
+          <span style={S.rowText}>
+            <span style={S.row}>
+              <strong style={S.primary}>{t('overviewTitle')}</strong>
+              <Tag tone={value.paused ? 'warning' : 'success'}>{value.paused ? t('paused') : t('enabled')}</Tag>
+            </span>
+            <span style={S.caption}>{t('pauseHint')}</span>
+          </span>
+          <Switch
+            checked={!value.paused}
+            label={t('pauseSwitch')}
+            disabled={busy}
+            onChange={(on) => { void run(() => api.setPaused(!on)).then((ok) => { if (ok) onChanged() }) }}
+          />
+        </div>
+        <div style={S.stats}>
+          {stats.map(([key, label, count]) => (
+            <div key={key} style={S.stat} data-testid={`her-memory-stat-${key}`}>
+              <span style={S.caption}>{label}</span>
+              <span style={S.statValue}>{count}</span>
+            </div>
+          ))}
+        </div>
+        {value.queue > 0 ? <span style={S.caption}>{t('queueLine', { count: value.queue })}</span> : null}
+        {value.extractError === null ? null : <span style={S.error}>{t('extractError', { time: when(value.extractError.at), error: value.extractError.message })}</span>}
+      </section>
+      <EmbeddingPanel api={api} t={t} embedding={embedding} run={run} busy={busy} onChanged={onChanged} selectModel={selectModel} />
+    </>
   )
 }
 

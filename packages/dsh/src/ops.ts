@@ -122,7 +122,7 @@ export class MemoryOps {
       case 'restore': engine.restore(int(payload.id, 'id')); return { ok: true }
       case 'purge': engine.purge(int(payload.id, 'id')); return { ok: true }
       case 'emptyTrash': {
-        const { items } = engine.list({ offset: 0, limit: 10_000, statuses: ['deleted'] })
+        const { items } = await engine.list({ offset: 0, limit: 10_000, statuses: ['deleted'] })
         for (const memory of items) engine.purge(memory.id)
         return { purged: items.length }
       }

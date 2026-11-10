@@ -15,12 +15,19 @@ import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { DEFAULT_PROMPTS, type Embedder, MemoryEngine, openAICompatibleEmbedder, openMemoryDatabase, systemClock } from '@her-os/memory-core'
 import { localModel, LocalEmbedder } from '@her-os/memory-local-embed'
 import { memoryCommands } from './commands.ts'
-import { Config, parseModelRoute, resolveConfig, scopeOf, type SessionScope } from './config.ts'
+import { Config, type LiveConfig, parseModelRoute, readConfig, resolveConfig, scopeOf, type SessionScope } from './config.ts'
 import { createLlmPort, type ModelRoute } from './llm.ts'
 import { MemoryOps } from './ops.ts'
 import { HerMemoryRemote } from './remote.ts'
 import { type Block, MemoryRuntime } from './runtime.ts'
 import { memoryTools } from './tools.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /** The DSH loader committed new values into this plugin's {@link LiveConfig} references. */
+    'loader/volatile-update'(paths: readonly (readonly string[])[]): void
+  }
+}
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
@@ -70,11 +77,18 @@ export function remoteEmbedderOf(config: Config): Embedder | null {
 }
 
 /**
- * Start the memory engine for the lifetime of this plugin instance.
+ * Start the memory engine for the lifetime of this plugin instance. A
+ * settings change restarts the instance, so everything below reads one
+ * consistent snapshot of the settings.
  * @param ctx - the plugin context.
- * @param config - the validated plugin Config.
+ * @param received - the validated plugin Config.
  */
-export function apply(ctx: Context, config: Config): void {
+export function apply(ctx: Context, received: LiveConfig): void {
+  const config = readConfig(received)
+  const applied = JSON.stringify(config)
+  ctx.on('loader/volatile-update', () => {
+    if (JSON.stringify(readConfig(received)) !== applied) void ctx.fiber.restart()
+  })
   const resolved = resolveConfig(config)
   const db = openMemoryDatabase({ path: resolved.dbPath, busyTimeoutMs: resolved.busyTimeoutMs })
   let pausedAtRuntime = false
@@ -96,6 +110,9 @@ export function apply(ctx: Context, config: Config): void {
       embeddingTimeoutMs: config.embedding.timeoutMs,
       proactive: config.proactive,
       dailyExtractLimit: config.dailyExtractLimit,
+      extractBatchTurns: config.extractBatchTurns,
+      extractIdleMs: config.extractIdleMinutes * 60_000,
+      extractBeforeRecall: config.extractBeforeRecall,
     }),
     busy: () => runtime?.busy() ?? false,
   })

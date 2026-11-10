@@ -16,7 +16,7 @@ const makeEngine = (): Harness => {
   const engine = new MemoryEngine({
     db, clock, prompts: DEFAULT_PROMPTS, logger: silentLogger,
     llm: { complete: async () => '{"memories":[],"proactive":[]}' },
-    settings: () => ({ paused: false, recallCount: 5, injectBudget: 800, embeddingTimeoutMs: 1500, proactive: 'low', dailyExtractLimit: 200 }),
+    settings: () => ({ paused: false, recallCount: 5, injectBudget: 800, embeddingTimeoutMs: 1500, proactive: 'low', dailyExtractLimit: 200, extractBatchTurns: 3, extractIdleMs: 300_000, extractBeforeRecall: true }),
   })
   return { engine, clock, dispose() { engine.dispose(); db.close(); rmSync(dir, { recursive: true, force: true }) } }
 }
