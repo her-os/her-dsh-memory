@@ -34,6 +34,21 @@ describe('extraction', () => {
     expect(ids).toEqual([])
   })
 
+  it('records the last background failure until a batch succeeds', async () => {
+    let fail = true
+    const llm = { complete: async () => { if (fail) throw new Error('model offline'); return extraction([]) } }
+    h = makeEngine({ llm })
+    h.engine.enqueueTurn('s1', turn(1, '我喜欢猫'))
+    await h.engine.pump(new Set(['s1']))
+    expect(h.engine.lastExtractionError()).toMatchObject({ message: 'model offline' })
+    expect(h.engine.repo.queueLength()).toBe(1)
+    fail = false
+    h.clock.advanceDays(1)
+    await h.engine.pump(new Set(['s1']))
+    expect(h.engine.lastExtractionError()).toBeNull()
+    expect(h.engine.repo.queueLength()).toBe(0)
+  })
+
   it('supersedes by fact key and keeps the chain', async () => {
     const llm = scriptedLlm(
       extraction([{ kind: 'profile', content: '用户住在北京', fact_key: 'home_city', evidence: '我住在北京' }]),

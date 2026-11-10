@@ -11,7 +11,8 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { defineConfig } from 'tsdown'
+import { typertPlugin } from '@deepseek-ai/dsh-typert-generator/tsdown'
+import { defineConfig, type UserConfig } from 'tsdown'
 
 const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { name: string }
 
@@ -25,8 +26,33 @@ const PLATFORM_MODULES = new Set([
   '@deepseek-ai/dsh-client-ui-dockkit',
 ])
 
-const HOST_PEERS = /^@deepseek-ai\/(?:cordis|schemastery)(?:\/|$)/
+/** Every DSH package stays an import: the Host resolves it, so singletons are shared. */
+const HOST_PEERS = /^@deepseek-ai\//
 const NODE_ENV = process.env.NODE_ENV ?? 'production'
+
+/**
+ * Only the decorator-lowering half of the Typert generator. Its artifact half
+ * analyzes packages inside the DSH monorepo and finds nothing here, so the
+ * Remote artifacts are written by hand in src/typert/.
+ */
+const lowerDecorators = { name: 'her-memory:lower-decorators', transform: typertPlugin().transform }
+
+/** Typert artifacts: one self-contained file each, so no shared chunks appear in lib/. */
+const typertArtifact = (name: string, source: string, bundleZod: boolean): UserConfig => ({
+  name,
+  entry: { [name]: source },
+  outDir: 'lib',
+  format: 'esm',
+  platform: 'neutral',
+  dts: false,
+  clean: false,
+  fixedExtension: false,
+  deps: {
+    onlyBundle: false,
+    neverBundle: (specifier: string) => HOST_PEERS.test(specifier) || (!bundleZod && specifier === 'zod'),
+    alwaysBundle: (specifier: string) => !HOST_PEERS.test(specifier) && (bundleZod || specifier !== 'zod'),
+  },
+})
 
 export default defineConfig([
   {
@@ -38,15 +64,20 @@ export default defineConfig([
     dts: false,
     clean: false,
     fixedExtension: false,
+    plugins: [lowerDecorators],
     deps: {
       onlyBundle: false,
       neverBundle: (specifier: string) => HOST_PEERS.test(specifier),
       alwaysBundle: (specifier: string) => !HOST_PEERS.test(specifier),
     },
   },
+  // The Host resolves only @deepseek-ai packages for plugins, so zod travels inside.
+  typertArtifact('typert.host', 'src/typert/host.ts', true),
+  // Client bundles that import this file provide zod as a platform module.
+  typertArtifact('typert.remote-client', 'src/typert/remote-client.ts', false),
   {
     name: 'client',
-    entry: { client: 'src/client/index.ts' },
+    entry: { client: 'src/client.ts' },
     outDir: 'lib',
     format: 'cjs',
     platform: 'browser',

@@ -27,11 +27,23 @@ describe.skipIf(!built)('built artifacts', () => {
     expect(required.filter(name => !PLATFORM_MODULES.has(name!))).toEqual([])
   })
 
-  it('imports only Node builtins and DSH peers from the host bundle', async () => {
+  it('imports only Node builtins and declared DSH peers from the host bundle', async () => {
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { peerDependencies: Record<string, string> }
     const code = readFileSync(new URL('index.js', lib), 'utf8')
     const imported = [...code.matchAll(/^import .* from "([^"]+)";$/gm)].map(match => match[1]!)
-    expect(imported.filter(name => !name.startsWith('node:') && !/^@deepseek-ai\/(cordis|schemastery)$/.test(name))).toEqual([])
+    expect(imported.filter(name => !name.startsWith('node:') && !(name in manifest.peerDependencies))).toEqual([])
     const mod = await import(new URL('index.js', lib).href) as Record<string, unknown>
-    expect(Object.keys(mod).sort()).toEqual(['Config', 'apply', 'name'])
+    expect(Object.keys(mod).sort()).toEqual(['Config', 'HerMemoryRemote', 'MAINTENANCE_INTERVAL_MS', 'PROMPT_SECTION', 'apply', 'embedderOf', 'name'])
+  })
+
+  it('publishes the herMemory Remote for both faces', async () => {
+    const host = await import(new URL('typert.host.js', lib).href) as { TYPERT: { package: string; face: string; invocations: readonly { endpoint?: string; method?: string }[] } }
+    expect(host.TYPERT.package).toBe('@her-os/dsh-memory')
+    expect(host.TYPERT.face).toBe('host')
+    expect(JSON.stringify(host.TYPERT.invocations)).toContain('herMemory/call')
+    const { validateTypertManifest } = await import('@deepseek-ai/dsh-typert-loader')
+    expect(() => validateTypertManifest('@her-os/dsh-memory', host.TYPERT)).not.toThrow()
+    const client = readFileSync(new URL('typert.remote-client.js', lib), 'utf8')
+    expect([...client.matchAll(/^import .* from "([^"]+)";$/gm)].map(match => match[1]).filter(name => name !== 'zod' && !name!.startsWith('@deepseek-ai/'))).toEqual([])
   })
 })

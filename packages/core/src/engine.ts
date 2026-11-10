@@ -75,6 +75,9 @@ export const EXTRACT_IDLE_MS = 5 * 60_000
 /** Retries of a failed extraction before the turns are dropped. */
 export const EXTRACT_MAX_ATTEMPTS = 3
 
+/** Meta key holding the last extraction failure as `{ at, message }` JSON, empty after a success. */
+export const LAST_EXTRACT_ERROR_META = 'last_extract_error'
+
 /** Existing memories shown to the extractor. */
 export const EXTRACT_RELATED = 15
 
@@ -487,14 +490,27 @@ export class MemoryEngine {
         const turns = items.map(item => JSON.parse(item.payload) as TurnPayload)
         await this.extractTurns(sessionId, turns)
         this.repo.dequeue(items.map(item => item.id))
+        this.repo.setMeta(LAST_EXTRACT_ERROR_META, '')
       } catch (error) {
         const attempts = Math.max(...items.map(item => item.attempts)) + 1
-        this.ports.logger.warn('extraction failed for %d turns (attempt %d): %s', items.length, attempts, error instanceof Error ? error.message : String(error))
+        const message = error instanceof Error ? error.message : String(error)
+        this.ports.logger.warn('extraction failed for %d turns (attempt %d): %s', items.length, attempts, message)
+        this.repo.setMeta(LAST_EXTRACT_ERROR_META, JSON.stringify({ at: now.toISOString(), message }))
         if (attempts >= EXTRACT_MAX_ATTEMPTS) this.repo.dequeue(items.map(item => item.id))
         else this.repo.retryLater(items.map(item => item.id), new Date(now.getTime() + 60_000 * 2 ** attempts))
       }
       await yieldToLoop()
     }
+  }
+
+  /**
+   * The last extraction failure, cleared by the next successful batch.
+   * @returns when and why it failed, or `null`.
+   */
+  lastExtractionError(): { at: string; message: string } | null {
+    const raw = this.repo.meta(LAST_EXTRACT_ERROR_META)
+    if (raw === undefined || raw === '') return null
+    try { return JSON.parse(raw) as { at: string; message: string } } catch { return null }
   }
 
   private takeDailyQuota(): boolean {
