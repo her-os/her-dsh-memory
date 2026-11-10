@@ -37,6 +37,9 @@ CREATE TABLE memories (
   reinforced_at TEXT,
   supersedes INTEGER REFERENCES memories(id),
   superseded_by INTEGER REFERENCES memories(id),
+  needs_confirm INTEGER NOT NULL DEFAULT 0 CHECK (needs_confirm IN (0, 1)),
+  people TEXT NOT NULL DEFAULT '[]',
+  deleted_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -51,11 +54,12 @@ CREATE TABLE memory_vectors (
   vector BLOB NOT NULL
 );
 
+-- rowid equals memories.id; tokens are Intl.Segmenter words joined by spaces.
 CREATE VIRTUAL TABLE memory_fts USING fts5(tokens, tokenize = 'unicode61');
 
 CREATE TABLE people (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
+  name TEXT NOT NULL UNIQUE,
   aliases TEXT NOT NULL DEFAULT '[]',
   relation TEXT,
   note TEXT,
@@ -83,6 +87,7 @@ CREATE TABLE proactive_log (
   memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
   session_id TEXT NOT NULL,
   mentioned_at TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'global',
   responded INTEGER CHECK (responded IN (0, 1))
 );
 CREATE INDEX proactive_log_memory ON proactive_log(memory_id, mentioned_at);

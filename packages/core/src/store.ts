@@ -15,12 +15,15 @@ export interface OpenOptions {
 
 /** Raised when the database was written by a newer build than this one. */
 export class SchemaTooNewError extends Error {
+  readonly found: number
+
   /**
    * @param found - the database's `user_version`.
    */
-  constructor(readonly found: number) {
+  constructor(found: number) {
     super(`memory database schema version ${found} is newer than supported version ${SCHEMA_VERSION}`)
     this.name = 'SchemaTooNewError'
+    this.found = found
   }
 }
 

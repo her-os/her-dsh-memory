@@ -1,4 +1,16 @@
 /** Host-independent memory core for Her. */
 
+export * from './embed.ts'
+export * from './engine.ts'
+export * from './extract.ts'
+export * from './lifecycle.ts'
+export * from './proactive.ts'
+export * from './prompts.ts'
+export * from './recall.ts'
+export * from './repo.ts'
 export { MEMORY_KINDS, MEMORY_STATUSES, SCHEMA_VERSION, TABLES } from './schema.ts'
 export { openMemoryDatabase, schemaVersion, SchemaTooNewError, type OpenOptions } from './store.ts'
+export * from './text.ts'
+export * from './time.ts'
+export * from './types.ts'
+export * from './vector.ts'
