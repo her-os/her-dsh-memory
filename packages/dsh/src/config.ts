@@ -3,6 +3,7 @@
 import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { DEFAULT_LOCAL_MODEL, type DownloadSource, LOCAL_MODELS, type LocalModel, modelBytes } from '@her-os/memory-local-embed'
 
 /** Where new memories are written and which memories a session sees. */
 export type ScopeMode = 'global' | 'preset' | 'workspace'
@@ -10,8 +11,19 @@ export type ScopeMode = 'global' | 'preset' | 'workspace'
 /** How often Her may bring something up unprompted. */
 export type ProactiveSetting = 'off' | 'low' | 'normal'
 
-/** OpenAI-compatible embedding endpoint; an empty base URL disables vectors. */
+/** Where vectors come from: a model on this machine, an OpenAI-compatible endpoint, or nowhere (keywords only). */
+export type EmbeddingProvider = 'local' | 'remote' | 'off'
+
+/** Semantic search settings. */
 export interface EmbeddingConfig {
+  provider: EmbeddingProvider
+  /** Model id from the local catalog. */
+  localModel: string
+  /** Mirror preference for the local model and runtime downloads. */
+  downloadSource: DownloadSource
+  /** Unload the local model after this many idle minutes; 0 keeps it loaded. */
+  unloadAfterMinutes: number
+  /** Remote endpoint; an empty base URL disables the remote provider. */
   baseURL: string
   apiKey: string
   model: string
@@ -42,6 +54,20 @@ export interface Config {
   embedding: EmbeddingConfig
 }
 
+const STARS = ['', '★', '★★', '★★★'] as const
+
+/**
+ * One-line description of a local model for the settings page.
+ * @param model - catalog entry.
+ * @returns name, download size, quality, speed, memory, languages.
+ */
+export function modelLabel(model: LocalModel): string {
+  const size = Math.round(modelBytes(model) / 1e6)
+  const languages = model.languages === 'zh' ? '只适合中文' : '中英等多语言'
+  const recommended = model.id === DEFAULT_LOCAL_MODEL ? '（推荐）' : ''
+  return `${model.name}${recommended} · 下载约 ${size} MB · 效果 ${STARS[model.quality]} · 速度 ${STARS[model.speed]} · 内存约 ${model.memoryMB} MB · ${languages}`
+}
+
 /** Lowest and highest accepted embedding time limit. */
 export const EMBEDDING_TIMEOUT_RANGE = [500, 10_000] as const
 
@@ -68,10 +94,24 @@ export const Config: z<Config> = z.object({
   extractModel: z.string().default('')
     .description('整理记忆用的模型，格式 provider:model。留空时用会话当前的模型。'),
   embedding: z.object({
-    baseURL: z.string().default('').description('OpenAI 兼容的 embeddings 地址，例如 https://api.example.com/v1。留空时只用关键词检索。'),
-    apiKey: z.string().role('secret').default('').description('Embedding 服务的 API Key。'),
-    model: z.string().default('').description('Embedding 模型名。'),
-    dimensions: z.natural().max(8192).default(0).description('向量维度。0 表示用模型默认值。改动后会在后台重算全部向量。'),
+    provider: z.union([
+      z.const('local').description('本机模型：第一次使用时在后台下载，之后离线可用'),
+      z.const('remote').description('云端服务：OpenAI 兼容的 embeddings 接口'),
+      z.const('off').description('关闭：只用关键词检索'),
+    ]).default('local').description('语义检索用什么生成向量。能找到意思相近、字面不同的记忆，例如「主子不吃饭」想起「养了只橘猫」。'),
+    localModel: z.union(LOCAL_MODELS.map(model => z.const(model.id).description(modelLabel(model)))).default(DEFAULT_LOCAL_MODEL)
+      .description('本机模型。越大效果越好，但下载更久、占内存更多。切换后会在后台重新计算全部向量。'),
+    downloadSource: z.union([
+      z.const('auto').description('自动：先试 Hugging Face，连不上再用国内镜像'),
+      z.const('huggingface').description('只用 Hugging Face 和 npm 官方源'),
+      z.const('modelscope').description('只用国内镜像（ModelScope 和 npmmirror）'),
+    ]).default('auto').description('本机模型的下载源。'),
+    unloadAfterMinutes: z.natural().max(1440).default(0)
+      .description('本机模型闲置多少分钟后释放内存，0 表示一直保留。释放后下一次回忆要重新加载，那一轮可能只用关键词。'),
+    baseURL: z.string().default('').description('云端服务：OpenAI 兼容的 embeddings 地址，例如 https://api.example.com/v1。'),
+    apiKey: z.string().role('secret').default('').description('云端服务的 API Key。'),
+    model: z.string().default('').description('云端服务的模型名。'),
+    dimensions: z.natural().max(8192).default(0).description('云端服务的向量维度。0 表示用模型默认值。改动后会在后台重算全部向量。'),
     timeoutMs: z.natural().min(EMBEDDING_TIMEOUT_RANGE[0]).max(EMBEDDING_TIMEOUT_RANGE[1]).default(1500)
       .description('每轮回忆等待 embedding 的毫秒数，超时这一轮只用关键词检索。调大能提高召回，但服务慢时每条回复都会多等这么久，聊天会明显变慢。'),
   }).description('语义检索'),
@@ -81,6 +121,8 @@ export const Config: z<Config> = z.object({
 export interface ResolvedConfig {
   dbPath: string
   busyTimeoutMs: number
+  /** Cache of local models and the inference runtime, shared by every profile. */
+  embeddingRoot: string
 }
 
 /**
@@ -91,9 +133,11 @@ export interface ResolvedConfig {
  */
 export function resolveConfig(config: Pick<Config, 'dbPath' | 'busyTimeoutMs'>, env: Record<string, string | undefined> = process.env): ResolvedConfig {
   const configured = config.dbPath?.trim()
+  const home = join(resolveDshHome(undefined, env), 'her-memory')
   return {
-    dbPath: configured ? configured : join(resolveDshHome(undefined, env), 'her-memory', 'memory.db'),
+    dbPath: configured ? configured : join(home, 'memory.db'),
     busyTimeoutMs: config.busyTimeoutMs,
+    embeddingRoot: join(home, 'embedding'),
   }
 }
 

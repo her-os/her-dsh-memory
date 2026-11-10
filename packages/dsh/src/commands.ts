@@ -3,6 +3,7 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CommandDefinition, CommandDefinitionId } from '@deepseek-ai/dsh-commands'
 import type { MemoryEngine } from '@her-os/memory-core'
+import type { LocalEmbedder, LocalStatus } from '@her-os/memory-local-embed'
 import type { SessionScope } from './config.ts'
 
 /** What the commands need from the plugin. */
@@ -11,6 +12,27 @@ export interface CommandHost {
   scopeOf(agent: Agent): SessionScope
   paused(): boolean
   setPaused(paused: boolean): void
+  /** The local embedder when the provider is `local`. */
+  readonly local?: LocalEmbedder | undefined
+}
+
+const mb = (bytes: number): string => `${Math.round(bytes / 1e6)} MB`
+
+/**
+ * One line on the local model, for `/memory`.
+ * @param status - the embedder's snapshot.
+ * @returns Chinese status text.
+ */
+export function localStatusLine(status: LocalStatus): string {
+  switch (status.state) {
+    case 'downloading': return `正在下载本地模型 ${status.model}：${mb(status.received)}/${mb(status.total)}，下好前只用关键词`
+    case 'waiting': return `另一个 DSH 进程正在下载本地模型 ${status.model}`
+    case 'loading': return `正在加载本地模型 ${status.model}`
+    case 'ready': return `本地模型 ${status.model} 已就绪`
+    case 'error': return `本地模型 ${status.model} 出错：${status.error ?? ''}`
+    case 'unsupported': return `本机平台不支持本地模型（支持 Apple 芯片 Mac、Windows、Linux），可在设置里改用云端服务`
+    case 'idle': return status.downloaded ? `本地模型 ${status.model} 已下载，用到时加载` : `本地模型 ${status.model} 未下载`
+  }
 }
 
 const DEFINITION_ID = '@her-os/dsh-memory' as CommandDefinitionId
@@ -43,6 +65,7 @@ export function memoryCommands(host: CommandHost): CommandDefinition[] {
           `在用 ${counts.active} 条，淡化 ${counts.faded} 条，归档 ${counts.archived} 条，回收站 ${counts.deleted} 条`,
           `待整理的对话：${host.engine.repo.queueLength()} 轮`,
           embedding.configured ? `语义检索：已向量化 ${embedding.done}/${embedding.total}${embedding.lastError === null ? '' : `，最近错误：${embedding.lastError}`}` : '语义检索：未配置，只用关键词',
+          ...(host.local === undefined ? [] : [localStatusLine(host.local.status())]),
           '在「插件 → Her 记忆」页面可以查看和管理全部记忆。',
         ]
         return { kind: 'success', text: lines.join('\n') }

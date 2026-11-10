@@ -13,6 +13,7 @@ import { type ContextFormed, createUserMessage, type LlmRuntime } from '@deepsee
 import type { SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { DEFAULT_PROMPTS, type Embedder, MemoryEngine, openAICompatibleEmbedder, openMemoryDatabase, systemClock } from '@her-os/memory-core'
+import { localModel, LocalEmbedder } from '@her-os/memory-local-embed'
 import { memoryCommands } from './commands.ts'
 import { Config, parseModelRoute, resolveConfig, scopeOf, type SessionScope } from './config.ts'
 import { createLlmPort, type ModelRoute } from './llm.ts'
@@ -54,13 +55,13 @@ const agentRoute = (agent: Agent): ModelRoute | undefined => {
 }
 
 /**
- * Build the embedder the settings describe.
+ * Build the remote embedder the settings describe.
  * @param config - plugin Config.
- * @returns the embedder, or `null` when no endpoint is configured.
+ * @returns the embedder, or `null` unless the provider is `remote` with an endpoint.
  */
-export function embedderOf(config: Config): Embedder | null {
-  const { baseURL, apiKey, model, dimensions } = config.embedding
-  if (baseURL.trim() === '' || model.trim() === '') return null
+export function remoteEmbedderOf(config: Config): Embedder | null {
+  const { provider, baseURL, apiKey, model, dimensions } = config.embedding
+  if (provider !== 'remote' || baseURL.trim() === '' || model.trim() === '') return null
   return openAICompatibleEmbedder({
     baseURL: baseURL.trim(), model: model.trim(),
     ...(apiKey === '' ? {} : { apiKey }),
@@ -111,7 +112,24 @@ export function apply(ctx: Context, config: Config): void {
   }, 'her-memory: database')
   ctx.logger.info('memory database ready at %s', resolved.dbPath)
 
-  engine.setEmbedder(embedderOf(config))
+  // The local model downloads and loads in the background; recall uses keywords until it is ready.
+  const model = localModel(config.embedding.localModel)
+  const local = config.embedding.provider === 'local' && model !== undefined
+    ? new LocalEmbedder({
+        model,
+        root: resolved.embeddingRoot,
+        source: config.embedding.downloadSource,
+        idleUnloadMs: config.embedding.unloadAfterMinutes * 60_000,
+        logger: ctx.logger,
+        onReady: () => { void engine.backfill() },
+      })
+    : undefined
+  const embedder = local ?? remoteEmbedderOf(config)
+  engine.setEmbedder(embedder)
+  if (local !== undefined) {
+    ctx.effect(() => () => { void local.dispose() }, 'her-memory: local embedding')
+    void local.prepare()
+  }
 
   const scopes = new Map<string, SessionScope>()
   const scopeOfAgent = (agent: Agent | undefined): SessionScope => {
@@ -184,6 +202,8 @@ export function apply(ctx: Context, config: Config): void {
     const timer = setInterval(() => {
       if (live.busy()) return
       void engine.pump().catch((error: unknown) => { ctx.logger.warn('extraction pass failed: %s', String(error)) })
+      // Other DSH processes (headless runs) add memories they may exit before embedding.
+      void engine.backfill()
       if (engine.consolidationDue()) {
         void engine.consolidate().then(
           result => { ctx.logger.info('memory consolidation: %d faded, %d archived, %d purged', result.faded, result.archived, result.purged) },
@@ -210,10 +230,10 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   ctx.inject(['commands'], (inner) => {
-    for (const command of memoryCommands({ engine, scopeOf: scopeOfAgent, paused, setPaused })) inner.effect(() => (inner as HostContext).commands!.register(command), `her-memory: /${command.name}`)
+    for (const command of memoryCommands({ engine, scopeOf: scopeOfAgent, paused, setPaused, local })) inner.effect(() => (inner as HostContext).commands!.register(command), `her-memory: /${command.name}`)
   })
 
-  const ops = new MemoryOps({ engine, embedderFromSettings: () => embedderOf(config), paused, setPaused })
+  const ops = new MemoryOps({ engine, embedding: { provider: config.embedding.provider, embedder, local, root: resolved.embeddingRoot }, paused, setPaused })
   ctx.inject(['typert'], (inner) => {
     inner.plugin(HerMemoryRemote, { ops })
   })

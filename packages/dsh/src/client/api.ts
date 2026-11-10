@@ -64,6 +64,36 @@ export interface EmbeddingStatus {
   readonly total: number
   readonly running: boolean
   readonly lastError: string | null
+  /** Where vectors come from, as configured. */
+  readonly provider: 'local' | 'remote' | 'off'
+  /** The local model's state, when the provider is `local`. */
+  readonly local: LocalModelStatus | null
+}
+
+/** Download and load state of the local model. */
+export interface LocalModelStatus {
+  readonly model: string
+  readonly state: 'idle' | 'downloading' | 'waiting' | 'loading' | 'ready' | 'error' | 'unsupported'
+  readonly received: number
+  readonly total: number
+  readonly downloaded: boolean
+  readonly error: string | null
+}
+
+/** One entry of the local model catalog. */
+export interface LocalModelItem {
+  readonly id: string
+  readonly name: string
+  readonly downloadMB: number
+  readonly dims: number
+  readonly languages: 'zh' | 'multi'
+  /** 1 to 3. */
+  readonly quality: number
+  /** 1 to 3. */
+  readonly speed: number
+  readonly memoryMB: number
+  readonly downloaded: boolean
+  readonly selected: boolean
 }
 
 /** Header numbers. */
@@ -123,6 +153,9 @@ export interface MemoryApi {
   embeddingStatus(): Promise<EmbeddingStatus>
   testEmbedding(): Promise<{ dimension: number; ms: number }>
   backfill(): Promise<void>
+  localModels(): Promise<{ supported: boolean; models: LocalModelItem[] }>
+  prepareLocalModel(): Promise<LocalModelStatus>
+  deleteLocalModel(id: string): Promise<void>
   setPaused(paused: boolean): Promise<{ paused: boolean }>
 }
 
@@ -161,6 +194,9 @@ export function createMemoryApi(call: CallRemote): MemoryApi {
     embeddingStatus: () => run('embeddingStatus'),
     testEmbedding: () => run('testEmbedding'),
     backfill: () => done('backfill', {}),
+    localModels: () => run('localModels'),
+    prepareLocalModel: () => run('prepareLocalModel'),
+    deleteLocalModel: id => done('deleteLocalModel', { id }),
     setPaused: paused => run('setPaused', { paused }),
   }
 }

@@ -7,7 +7,7 @@
 
 import type { DatabaseSync } from 'node:sqlite'
 import { setImmediate as yieldToLoop } from 'node:timers/promises'
-import { type Embedder, embedWithin } from './embed.ts'
+import { type EmbedPurpose, type Embedder, EmbedderNotReadyError, embedWithin } from './embed.ts'
 import { buildExtractInput, type Candidate, checkCandidate, isSkippableTurn, jaccard, parseExtraction, PROBLEM_TEXT, type TurnPayload } from './extract.ts'
 import { currentStrength, decayedStatus, isDecayExempt, MAX_STRENGTH, REINFORCE_STEP } from './lifecycle.ts'
 import { FOLLOW_UP_WINDOW_DAYS, type Offer, pickOffer, type ProactiveLevel, REMINISCE_MIN_AGE_DAYS, shouldOffer } from './proactive.ts'
@@ -248,6 +248,8 @@ export class MemoryEngine {
           try {
             vectors = await embedWithin(embedder, batch.map(item => item.content), EMBED_BATCH_TIMEOUT_MS)
           } catch (error) {
+            // The embedder announces readiness and the host starts backfill again.
+            if (error instanceof EmbedderNotReadyError) { this.backfillError = null; return }
             this.backfillError = error instanceof Error ? error.message : String(error)
             this.ports.logger.warn('embedding batch failed (attempt %d): %s', attempt + 1, this.backfillError)
             await sleep(Math.min(30_000, 1000 * 2 ** attempt))
@@ -298,10 +300,10 @@ export class MemoryEngine {
     return index
   }
 
-  private async embedOne(text: string, ms: number, signal?: AbortSignal): Promise<Float32Array | undefined> {
+  private async embedOne(text: string, purpose: EmbedPurpose, ms: number, signal?: AbortSignal): Promise<Float32Array | undefined> {
     if (this.embedder === null) return undefined
     try {
-      const [vector] = await embedWithin(this.embedder, [text], ms, signal)
+      const [vector] = await embedWithin(this.embedder, [text], ms, signal, purpose)
       return vector
     } catch (error) {
       this.ports.logger.info('query embedding skipped: %s', error instanceof Error ? error.message : String(error))
@@ -361,7 +363,7 @@ export class MemoryEngine {
 
     const wantVectors = !this.skipVectorsNextTurn
     this.skipVectorsNextTurn = false
-    const query = wantVectors && request.userText.trim() !== '' ? await this.embedOne(request.userText, settings.embeddingTimeoutMs, request.signal) : undefined
+    const query = wantVectors && request.userText.trim() !== '' ? await this.embedOne(request.userText, 'query', settings.embeddingTimeoutMs, request.signal) : undefined
     const started = performance.now()
     const keywordIds = this.repo.keywordSearch(request.userText, RETRIEVAL_DEPTH, RECALL_STATUSES, request.scopes)
     const index = query === undefined ? undefined : this.vectorIndex()
@@ -492,6 +494,7 @@ export class MemoryEngine {
         this.repo.dequeue(items.map(item => item.id))
         this.repo.setMeta(LAST_EXTRACT_ERROR_META, '')
       } catch (error) {
+        if (this.disposed) return
         const attempts = Math.max(...items.map(item => item.attempts)) + 1
         const message = error instanceof Error ? error.message : String(error)
         this.ports.logger.warn('extraction failed for %d turns (attempt %d): %s', items.length, attempts, message)
@@ -663,7 +666,7 @@ export class MemoryEngine {
     const fingerprint = this.embedder.fingerprint()
     const suppressions = this.repo.suppressions().filter(s => s.vector !== null && s.fingerprint === fingerprint)
     if (suppressions.length === 0) return false
-    const vector = await this.embedOne(content, EMBED_BATCH_TIMEOUT_MS)
+    const vector = await this.embedOne(content, 'document', EMBED_BATCH_TIMEOUT_MS)
     return vector !== undefined && suppressions.some(s => s.vector!.length === vector.length && cosine(s.vector!, vector) >= SUPPRESS_SIMILARITY)
   }
 
@@ -678,7 +681,7 @@ export class MemoryEngine {
    */
   async search(text: string, scopes: readonly string[], limit = 10): Promise<{ memory: Memory; history: Memory[] }[]> {
     const keywordIds = this.repo.keywordSearch(text, RETRIEVAL_DEPTH, SEARCH_STATUSES, scopes)
-    const query = await this.embedOne(text, this.ports.settings().embeddingTimeoutMs)
+    const query = await this.embedOne(text, 'query', this.ports.settings().embeddingTimeoutMs)
     const index = query === undefined ? undefined : this.vectorIndex()
     const vectorIds = index !== undefined && query !== undefined && query.length === index.dim ? (await index.searchAsync(query, RETRIEVAL_DEPTH)).map(hit => hit.id) : []
     const fused = [...reciprocalRankFusion([keywordIds, vectorIds]).entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id)

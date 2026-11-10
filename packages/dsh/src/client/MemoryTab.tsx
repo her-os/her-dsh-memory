@@ -8,6 +8,7 @@ import { Button, Input, SegmentedControl, Switch } from '@deepseek-ai/dsh-client
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { type ReactNode, useCallback, useId, useState } from 'react'
 import type { MemoryApi, PersonItem } from './api.ts'
+import { EmbeddingPanel, embeddingBusy, usePoll } from './EmbeddingPanel.tsx'
 import { MemoryDetail } from './MemoryDetail.tsx'
 import { MemoryList } from './MemoryList.tsx'
 import { splitList } from './draft.ts'
@@ -78,7 +79,7 @@ function Overview({ api, t, overview, run, busy, onChanged }: {
   busy: boolean
   onChanged: () => void
 }): ReactNode {
-  const [test, setTest] = useState<string | undefined>()
+  usePoll(overview.value !== undefined && embeddingBusy(overview.value.embedding), overview.reload)
   if (overview.error !== undefined && overview.value === undefined) return <LoadError error={overview.error} retry={overview.reload} t={t} />
   const value = overview.value
   if (value === undefined) return <p style={S.secondary}>{t('loading')}</p>
@@ -100,50 +101,7 @@ function Overview({ api, t, overview, run, busy, onChanged }: {
         {t('countLine', { active: counts.active, faded: counts.faded, archived: counts.archived, deleted: counts.deleted })}
         {value.queue > 0 ? ` · ${t('queueLine', { count: value.queue })}` : ''}
       </span>
-      <div style={S.between}>
-        <span style={S.secondary}>
-          <strong style={S.primary}>{t('embeddingTitle')}</strong>
-          {' · '}
-          {embedding.configured
-            ? (
-                <>
-                  {t('embeddingProgress', { done: embedding.done, total: embedding.total })}
-                  {embedding.running ? ` · ${t('embeddingRunning')}` : ''}
-                  {embedding.lastError === null ? '' : ` · ${t('embeddingError', { error: embedding.lastError })}`}
-                </>
-              )
-            : t('embeddingOff')}
-        </span>
-        {embedding.configured
-          ? (
-              <span style={S.row}>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => {
-                    setTest(undefined)
-                    void run(async () => {
-                      const result = await api.testEmbedding()
-                      setTest(t('testResult', { dimension: result.dimension, ms: result.ms }))
-                    })
-                  }}
-                >
-                  {t('testEmbedding')}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy || embedding.running || embedding.done >= embedding.total}
-                  onClick={() => { void run(() => api.backfill()).then((ok) => { if (ok) onChanged() }) }}
-                >
-                  {t('backfill')}
-                </Button>
-              </span>
-            )
-          : null}
-      </div>
-      {test === undefined ? null : <span style={S.success}>{test}</span>}
+      <EmbeddingPanel api={api} t={t} embedding={embedding} run={run} busy={busy} onChanged={onChanged} />
     </div>
   )
 }

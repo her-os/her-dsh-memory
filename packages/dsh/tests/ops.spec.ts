@@ -29,7 +29,7 @@ const setup = () => {
   let paused = false
   const ops = new MemoryOps({
     engine: h.engine,
-    embedderFromSettings: () => null,
+    embedding: { provider: 'off', embedder: null, local: undefined, root: join(tmpdir(), 'her-memory-ops-embedding') },
     paused: () => paused,
     setPaused: (next) => { paused = next },
   })

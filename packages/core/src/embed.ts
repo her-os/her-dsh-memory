@@ -1,14 +1,18 @@
 /** OpenAI-compatible embedding client. */
 
+/** What a text is embedded for; asymmetric models prefix queries and documents differently. */
+export type EmbedPurpose = 'query' | 'document'
+
 /** Embedding port of the engine. */
 export interface Embedder {
   /**
    * Embed texts in order.
    * @param texts - inputs.
    * @param signal - cancels the request.
+   * @param purpose - search query or stored memory; defaults to `document`.
    * @returns one vector per input.
    */
-  embed(texts: readonly string[], signal?: AbortSignal): Promise<Float32Array[]>
+  embed(texts: readonly string[], signal?: AbortSignal, purpose?: EmbedPurpose): Promise<Float32Array[]>
   /**
    * Identity of the vector space: endpoint, model, and dimension. Vectors with another fingerprint are stale.
    * @returns the fingerprint.
@@ -74,6 +78,20 @@ export function openAICompatibleEmbedder(settings: EmbeddingSettings, fetchImpl:
   }
 }
 
+/**
+ * The embedder cannot answer yet, e.g. a local model still downloading. Callers
+ * fall back to keywords and wait for the embedder to announce readiness.
+ */
+export class EmbedderNotReadyError extends Error {
+  /**
+   * @param message - what the embedder is waiting for.
+   */
+  constructor(message: string) {
+    super(message)
+    this.name = 'EmbedderNotReadyError'
+  }
+}
+
 /** Raised when an embedding call exceeds its time limit. */
 export class EmbeddingTimeoutError extends Error {
   readonly ms: number
@@ -94,14 +112,15 @@ export class EmbeddingTimeoutError extends Error {
  * @param texts - inputs.
  * @param ms - time limit.
  * @param signal - outer cancellation.
+ * @param purpose - search query or stored memory.
  * @returns the vectors.
  * @throws {EmbeddingTimeoutError} when the limit elapses first.
  */
-export async function embedWithin(embedder: Embedder, texts: readonly string[], ms: number, signal?: AbortSignal): Promise<Float32Array[]> {
+export async function embedWithin(embedder: Embedder, texts: readonly string[], ms: number, signal?: AbortSignal, purpose: EmbedPurpose = 'document'): Promise<Float32Array[]> {
   const timeout = AbortSignal.timeout(ms)
   const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout])
   try {
-    return await embedder.embed(texts, combined)
+    return await embedder.embed(texts, combined, purpose)
   } catch (error) {
     if (timeout.aborted && signal?.aborted !== true) throw new EmbeddingTimeoutError(ms)
     throw error

@@ -33,7 +33,7 @@ describe.skipIf(!built)('built artifacts', () => {
     const imported = [...code.matchAll(/^import .* from "([^"]+)";$/gm)].map(match => match[1]!)
     expect(imported.filter(name => !name.startsWith('node:') && !(name in manifest.peerDependencies))).toEqual([])
     const mod = await import(new URL('index.js', lib).href) as Record<string, unknown>
-    expect(Object.keys(mod).sort()).toEqual(['Config', 'HerMemoryRemote', 'MAINTENANCE_INTERVAL_MS', 'PROMPT_SECTION', 'apply', 'embedderOf', 'name'])
+    expect(Object.keys(mod).sort()).toEqual(['Config', 'HerMemoryRemote', 'MAINTENANCE_INTERVAL_MS', 'PROMPT_SECTION', 'apply', 'name', 'remoteEmbedderOf'])
   })
 
   it('publishes the herMemory Remote for both faces', async () => {

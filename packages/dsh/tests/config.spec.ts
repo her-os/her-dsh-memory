@@ -8,12 +8,18 @@ describe('resolveConfig', () => {
     expect(resolveConfig(config, { DSH_HOME: '/tmp/dsh-home' })).toEqual({
       dbPath: join('/tmp/dsh-home', 'her-memory', 'memory.db'),
       busyTimeoutMs: 5000,
+      embeddingRoot: join('/tmp/dsh-home', 'her-memory', 'embedding'),
     })
+  })
+
+  it('downloads the default local model from any mirror by default', () => {
+    const config = Config({} as Config)
+    expect(config.embedding).toMatchObject({ provider: 'local', localModel: 'embeddinggemma-q4', downloadSource: 'auto', unloadAfterMinutes: 0 })
   })
 
   it('uses an explicit path as given', () => {
     const config = Config({ dbPath: '/data/her.db', busyTimeoutMs: 800 } as Config)
-    expect(resolveConfig(config, {})).toEqual({ dbPath: '/data/her.db', busyTimeoutMs: 800 })
+    expect(resolveConfig(config, {})).toMatchObject({ dbPath: '/data/her.db', busyTimeoutMs: 800 })
   })
 
   it('rejects a lock wait below 100ms', () => {

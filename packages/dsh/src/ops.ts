@@ -4,13 +4,24 @@
  * runtime; {@link MemoryOps} is the one place that maps them onto the engine.
  */
 
+import { deleteModel, LOCAL_MODELS, type LocalEmbedder, modelBytes, modelDownloaded, runtimeSupported } from '@her-os/memory-local-embed'
 import { type Embedder, type ListQuery, type Memory, MEMORY_KINDS, type MemoryEngine, type MemoryKind, type MemoryPatch, type MemoryStatus, MEMORY_STATUSES } from '@her-os/memory-core'
+
+/** Semantic search as the settings configured it. */
+export interface OpsEmbedding {
+  readonly provider: 'local' | 'remote' | 'off'
+  /** The live embedder, or `null` when vectors are off or unconfigured. */
+  readonly embedder: Embedder | null
+  /** The local embedder when the provider is `local`. */
+  readonly local: LocalEmbedder | undefined
+  /** Local model cache root. */
+  readonly root: string
+}
 
 /** Runtime switches the ops read and change. */
 export interface OpsHost {
   readonly engine: MemoryEngine
-  /** Embedder built from the current settings, or `null` when unconfigured. */
-  embedderFromSettings(): Embedder | null
+  readonly embedding: OpsEmbedding
   paused(): boolean
   setPaused(paused: boolean): void
 }
@@ -126,11 +137,25 @@ export class MemoryOps {
       }
       case 'suppressions': return engine.repo.suppressions().map(s => ({ id: s.id, summary: s.summary }))
       case 'removeSuppression': engine.repo.removeSuppression(int(payload.id, 'id')); return { ok: true }
-      case 'embeddingStatus': return engine.embeddingStatus()
+      case 'embeddingStatus': return this.embeddingStatus()
       case 'testEmbedding': {
-        const embedder = this.host.embedderFromSettings()
+        const { embedder } = this.host.embedding
         if (embedder === null) throw new OpError('embedding is not configured')
         return engine.testEmbedding(embedder)
+      }
+      case 'localModels': return this.localModels()
+      case 'prepareLocalModel': {
+        const { local } = this.host.embedding
+        if (local === undefined) throw new OpError('the local model is not selected')
+        void local.prepare()
+        return local.status()
+      }
+      case 'deleteLocalModel': {
+        const id = str(payload.id, 'id')
+        if (!LOCAL_MODELS.some(model => model.id === id)) throw new OpError(`unknown model ${id}`)
+        if (this.host.embedding.local?.model.id === id) throw new OpError('the model in use cannot be deleted')
+        deleteModel(this.host.embedding.root, id)
+        return { ok: true }
       }
       case 'backfill': void engine.backfill(); return { ok: true }
       case 'setPaused': this.host.setPaused(payload.paused === true); return { paused: this.host.paused() }
@@ -145,7 +170,31 @@ export class MemoryOps {
       counts: engine.repo.countByStatus(),
       queue: engine.repo.queueLength(),
       extractError: engine.lastExtractionError(),
-      embedding: engine.embeddingStatus(),
+      embedding: this.embeddingStatus(),
+    }
+  }
+
+  private embeddingStatus(): unknown {
+    const { provider, local } = this.host.embedding
+    return { ...this.host.engine.embeddingStatus(), provider, local: local?.status() ?? null }
+  }
+
+  private localModels(): unknown {
+    const { local, root } = this.host.embedding
+    return {
+      supported: runtimeSupported(),
+      models: LOCAL_MODELS.map(model => ({
+        id: model.id,
+        name: model.name,
+        downloadMB: Math.round(modelBytes(model) / 1e6),
+        dims: model.dims,
+        languages: model.languages,
+        quality: model.quality,
+        speed: model.speed,
+        memoryMB: model.memoryMB,
+        downloaded: modelDownloaded(root, model.id),
+        selected: local?.model.id === model.id,
+      })),
     }
   }
 

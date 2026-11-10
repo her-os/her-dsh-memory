@@ -1,7 +1,7 @@
 /** Detail dialog of one memory: edit, flags, lifecycle actions, history, and why it was recalled. */
 
 import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { KINDS, type Kind, type MemoryApi, type MemoryDetail as Detail, type MemoryItem, type MemoryPatch } from './api.ts'
 import { type Draft, draftOf, draftPatch, splitList } from './draft.ts'
 import { MemoryTags } from './MemoryList.tsx'
@@ -27,7 +27,17 @@ export function MemoryDetail({ id, api, t, onClose, onChanged, confirm, run, bus
   const detail = useLoad<Detail | undefined>(async () => shown === undefined ? undefined : api.detail(shown), [api, shown])
   const memory = detail.value?.memory
   const [draft, setDraft] = useState<Draft | undefined>()
-  useEffect(() => { setDraft(memory === undefined ? undefined : draftOf(memory)) }, [memory])
+  // Id of the memory the user has unsaved edits for; a reload of that memory keeps them.
+  const edited = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (memory !== undefined && edited.current === memory.id) return
+    edited.current = undefined
+    setDraft(memory === undefined ? undefined : draftOf(memory))
+  }, [memory])
+  const editDraft = (next: Draft): void => {
+    edited.current = memory?.id
+    setDraft(next)
+  }
 
   const act = async (action: () => Promise<unknown>, follow?: (result: unknown) => void): Promise<void> => {
     let result: unknown
@@ -47,7 +57,7 @@ export function MemoryDetail({ id, api, t, onClose, onChanged, confirm, run, bus
       if (Object.keys(patch).length > 0) current = await api.patch(current.id, patch)
       if (content !== '' && content !== memory.content) current = await api.correct(current.id, content)
       return current
-    }, (result) => { setShown((result as MemoryItem).id); detail.reload() })
+    }, (result) => { edited.current = undefined; setShown((result as MemoryItem).id); detail.reload() })
   }
 
   const flag = (patch: MemoryPatch): void => { if (memory !== undefined) void act(() => api.patch(memory.id, patch)) }
@@ -75,34 +85,34 @@ export function MemoryDetail({ id, api, t, onClose, onChanged, confirm, run, bus
 
               <label style={S.field}>
                 <span style={S.secondary}>{t('content')}</span>
-                <textarea style={S.textarea} value={draft.content} disabled={!editable} onChange={(event) => { setDraft({ ...draft, content: event.target.value }) }} />
+                <textarea style={S.textarea} value={draft.content} disabled={!editable} onChange={(event) => { editDraft({ ...draft, content: event.target.value }) }} />
                 {contentChanged ? <span style={S.caption}>{t('correctionHint')}</span> : null}
               </label>
               <div style={S.row}>
                 <label style={S.field}>
                   <span style={S.secondary}>{t('kind')}</span>
-                  <select style={S.select} value={draft.kind} disabled={!editable} onChange={(event) => { setDraft({ ...draft, kind: event.target.value as Kind }) }}>
+                  <select style={S.select} value={draft.kind} disabled={!editable} onChange={(event) => { editDraft({ ...draft, kind: event.target.value as Kind }) }}>
                     {KINDS.map(value => <option key={value} value={value}>{t(`kind.${value}`)}</option>)}
                   </select>
                 </label>
                 <label style={S.field}>
                   <span style={S.secondary}>{t('importance')}</span>
-                  <select style={S.select} value={draft.importance} disabled={!editable} onChange={(event) => { setDraft({ ...draft, importance: Number(event.target.value) }) }}>
+                  <select style={S.select} value={draft.importance} disabled={!editable} onChange={(event) => { editDraft({ ...draft, importance: Number(event.target.value) }) }}>
                     {[1, 2, 3].map(value => <option key={value} value={value}>{t(`importance.${value as 1 | 2 | 3}`)}</option>)}
                   </select>
                 </label>
                 <label style={S.field}>
                   <span style={S.secondary}>{t('occurredAt')}</span>
-                  <Input type="date" value={draft.occurredAt} disabled={!editable} onChange={(event) => { setDraft({ ...draft, occurredAt: event.target.value }) }} />
+                  <Input type="date" value={draft.occurredAt} disabled={!editable} onChange={(event) => { editDraft({ ...draft, occurredAt: event.target.value }) }} />
                 </label>
                 <label style={S.field}>
                   <span style={S.secondary}>{t('followUpAt')}</span>
-                  <Input type="date" value={draft.followUpAt} disabled={!editable} onChange={(event) => { setDraft({ ...draft, followUpAt: event.target.value }) }} />
+                  <Input type="date" value={draft.followUpAt} disabled={!editable} onChange={(event) => { editDraft({ ...draft, followUpAt: event.target.value }) }} />
                 </label>
               </div>
               <label style={S.field}>
                 <span style={S.secondary}>{t('people')}</span>
-                <Input value={draft.people} disabled={!editable} onChange={(event) => { setDraft({ ...draft, people: event.target.value }) }} />
+                <Input value={draft.people} disabled={!editable} onChange={(event) => { editDraft({ ...draft, people: event.target.value }) }} />
               </label>
               {editable
                 ? (
