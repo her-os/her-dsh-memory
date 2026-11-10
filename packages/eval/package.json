@@ -1,0 +1,7 @@
+{
+  "name": "@her-os/memory-eval",
+  "version": "0.0.0",
+  "description": "Evaluation sets and benchmarks for Her memory",
+  "private": true,
+  "type": "module"
+}
