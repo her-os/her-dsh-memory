@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm --filter @her-os/dsh-memory run build
+      - run: pnpm test
+
+  e2e:
+    name: DSH end-to-end (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # offline: headless and Web UI against a mock model, no downloads.
+        # local-embed: real runtime and model download (~140 MB), semantic recall.
+        suite: [offline, local-embed]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run
+        env:
+          HER_MEMORY_E2E_LOCAL: ${{ matrix.suite == 'local-embed' && '1' || '' }}
+        run: |
+          if [ "${{ matrix.suite }}" = local-embed ]; then
+            pnpm --filter @her-os/dsh-memory-e2e exec vitest run --config vitest.config.ts tests/local-embed.e2e.ts
+          else
+            pnpm --filter @her-os/dsh-memory-e2e exec vitest run --config vitest.config.ts tests/headless.e2e.ts tests/web.e2e.ts
+          fi

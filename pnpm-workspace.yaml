@@ -1,0 +1,10 @@
+packages:
+  - packages/*
+
+# Native helpers of the DSH CLI the e2e tests run; headless and web runs do not need them.
+allowBuilds:
+  '@deepseek-ai/dsh-subprocess-local': false
+  '@google/genai': false
+  koffi: false
+  node-pty: false
+  protobufjs: false

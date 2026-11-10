@@ -1,0 +1,13 @@
+{
+  "name": "@her-os/memory-core",
+  "version": "0.0.0",
+  "description": "Host-independent memory store, retrieval and lifecycle for Her",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}
