@@ -2,6 +2,7 @@
   "name": "@her-os/dsh-memory-e2e",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
   "description": "End-to-end tests of the Her memory plugin inside a real DSH",
   "type": "module",
   "scripts": {

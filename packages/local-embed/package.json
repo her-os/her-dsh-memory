@@ -2,6 +2,7 @@
   "name": "@her-os/memory-local-embed",
   "version": "0.0.1",
   "description": "On-device text embedding for Her memory: the ONNX runtime and the model download on first use",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "exports": {
