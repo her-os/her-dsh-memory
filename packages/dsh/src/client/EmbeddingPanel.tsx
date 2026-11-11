@@ -68,7 +68,7 @@ function statusTag(embedding: EmbeddingStatus, t: T): [TagTone, string] {
  * @param props - api, translator, status, action runner, refresh and model selection.
  * @returns the card.
  */
-export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged, selectModel, enableLocal }: {
+export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged, selectModel, enableLocal, disable }: {
   api: MemoryApi
   t: T
   embedding: EmbeddingStatus
@@ -79,30 +79,41 @@ export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged, select
   selectModel: (id: string) => void
   /** Switch the source to the local model; the Host then downloads it. */
   enableLocal: () => void
+  /** Turn semantic search off; downloaded files stay. */
+  disable: () => void
 }): ReactNode {
   const [test, setTest] = useState<string | undefined>()
   const [catalogOpen, setCatalogOpen] = useState(false)
-  const { local } = embedding
-  const version = `${local?.model ?? ''}:${String(local?.downloaded ?? false)}`
-  const catalog = useLoad(async () => embedding.provider === 'local' ? await api.localModels() : undefined, [api, embedding.provider, version])
+  const { local, provider } = embedding
+  const version = `${provider}:${local?.model ?? ''}:${String(local?.downloaded ?? false)}`
+  // Off still lists the models, so downloaded files can be deleted or one picked to turn search back on.
+  const showsCatalog = provider !== 'remote'
+  const catalog = useLoad(async () => showsCatalog ? await api.localModels() : undefined, [api, showsCatalog, version])
   const modelName = catalog.value?.models.find(model => model.id === local?.model)?.name ?? local?.model ?? ''
   const progress = local !== null && local.state === 'downloading' && local.total > 0 ? local.received / local.total : undefined
   const [tone, label] = statusTag(embedding, t)
+  const useModel = (id: string): void => {
+    selectModel(id)
+    if (provider !== 'local') enableLocal()
+  }
+  const status = [
+    local === null ? undefined : localLine(local, t),
+    embedding.configured ? t('embeddingProgress', { done: embedding.done, total: embedding.total }) : undefined,
+    embedding.running ? t('embeddingRunning') : undefined,
+  ].filter(part => part !== undefined).join(' · ')
   return (
     <section style={S.card} data-testid="her-memory-embedding">
       <div style={S.between}>
-        <span style={S.rowText}>
-          <span style={S.row}>
-            <strong style={S.primary}>{t('embeddingTitle')}</strong>
-            <Tag tone={tone}>{label}</Tag>
-          </span>
-          <span style={S.secondary}>
-            {embedding.provider === 'off' ? t('embeddingDisabledHint') : embedding.provider === 'local' ? t('providerLocal', { model: modelName }) : t('providerRemote')}
-          </span>
+        <span style={S.row}>
+          <strong style={S.primary}>{t('embeddingTitle')}</strong>
+          <Tag tone={tone}>{label}</Tag>
         </span>
         <span style={S.row}>
           {local !== null && local.state === 'error'
             ? <Button size="sm" variant="primary" disabled={busy} onClick={() => { void run(() => api.prepareLocalModel()).then((ok) => { if (ok) onChanged() }) }}>{t('localRetry')}</Button>
+            : null}
+          {provider === 'off'
+            ? <Button size="sm" variant="primary" disabled={busy} onClick={enableLocal}>{t('enableLocal')}</Button>
             : null}
           {embedding.configured
             ? (
@@ -121,28 +132,26 @@ export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged, select
                   >
                     {t('testEmbedding')}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy || embedding.running || embedding.done >= embedding.total}
-                    onClick={() => { void run(() => api.backfill()).then((ok) => { if (ok) onChanged() }) }}
-                  >
-                    {t('backfill')}
-                  </Button>
+                  {embedding.done < embedding.total || embedding.running
+                    ? (
+                        <Button size="sm" variant="outline" disabled={busy || embedding.running} onClick={() => { void run(() => api.backfill()).then((ok) => { if (ok) onChanged() }) }}>
+                          {t('backfill')}
+                        </Button>
+                      )
+                    : null}
                 </>
               )
             : null}
+          {provider === 'off' ? null : <Button size="sm" variant="ghost" disabled={busy} onClick={disable}>{t('disableSemantic')}</Button>}
         </span>
       </div>
-      {embedding.provider === 'off'
-        ? (
-            <div style={S.row}>
-              <Button size="sm" variant="primary" disabled={busy} onClick={enableLocal}>{t('enableLocal')}</Button>
-              <span style={S.caption}>{t('enableLocalHint')}</span>
-            </div>
-          )
-        : null}
-      {local === null ? null : <span style={local.state === 'error' ? S.error : S.caption} data-testid="her-memory-local-state">{localLine(local, t)}</span>}
+      <span style={S.secondary}>
+        {provider === 'off' ? t('embeddingDisabledHint') : provider === 'local' ? t('providerLocal', { model: modelName }) : t('providerRemote')}
+      </span>
+      {provider === 'off' ? <span style={S.caption}>{t('enableLocalHint')}</span> : null}
+      {status === '' ? null : <span style={local?.state === 'error' ? S.error : S.caption} data-testid="her-memory-local-state">{status}</span>}
+      {embedding.lastError === null ? null : <span style={S.error}>{t('embeddingError', { error: embedding.lastError })}</span>}
+      {!embedding.configured && provider === 'remote' ? <span style={S.caption}>{t('embeddingOff')}</span> : null}
       {progress === undefined
         ? null
         : (
@@ -150,26 +159,17 @@ export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged, select
               <div style={{ width: `${Math.round(progress * 100)}%`, height: '100%', background: 'var(--dsw-alias-state-success-primary)' }} />
             </div>
           )}
-      {embedding.configured
-        ? (
-            <span style={S.caption}>
-              {t('embeddingProgress', { done: embedding.done, total: embedding.total })}
-              {embedding.running ? ` · ${t('embeddingRunning')}` : ''}
-              {embedding.lastError === null ? '' : ` · ${t('embeddingError', { error: embedding.lastError })}`}
-            </span>
-          )
-        : embedding.provider === 'remote' ? <span style={S.caption}>{t('embeddingOff')}</span> : null}
-      {test === undefined ? null : <span style={S.success}>{test}</span>}
-      {embedding.provider === 'local'
+      {test === undefined ? null : <span style={{ ...S.caption, ...S.success }}>{test}</span>}
+      {showsCatalog
         ? (
             <div>
-              <Button size="sm" variant="ghost" aria-expanded={catalogOpen} onClick={() => { setCatalogOpen(open => !open) }}>
-                {`${catalogOpen ? '▾' : '▸'} ${t('showModels')}`}
+              <Button size="sm" variant="outline" aria-expanded={catalogOpen} onClick={() => { setCatalogOpen(open => !open) }}>
+                {catalogOpen ? t('hideModels') : t('showModels')}
               </Button>
             </div>
           )
         : null}
-      {catalogOpen && embedding.provider === 'local' ? <ModelCatalog api={api} t={t} run={run} busy={busy} catalog={catalog} selectModel={selectModel} /> : null}
+      {catalogOpen && showsCatalog ? <ModelCatalog api={api} t={t} run={run} busy={busy} catalog={catalog} selectModel={useModel} /> : null}
     </section>
   )
 }

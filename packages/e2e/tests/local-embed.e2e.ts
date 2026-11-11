@@ -58,12 +58,12 @@ describe.runIf(process.env.HER_MEMORY_E2E_LOCAL === '1')('her-memory local embed
 
   it('downloads and loads the model in the background, showing its state', async () => {
     const state = page.getByTestId('her-memory-local-state')
-    await expect.poll(async () => await state.textContent(), { timeout: READY_TIMEOUT_MS, interval: 2000 }).toBe('模型已就绪')
+    await expect.poll(async () => await state.textContent(), { timeout: READY_TIMEOUT_MS, interval: 2000 }).toMatch(/^模型已就绪/u)
     await expect.poll(() => existsSync(join(home.dir, 'her-memory', 'embedding', 'models', MODEL, '.complete'))).toBe(true)
   }, READY_TIMEOUT_MS)
 
   it('lists the catalog with the model in use', async () => {
-    await page.getByRole('button', { name: '本地模型' }).click()
+    await page.getByRole('button', { name: '更换或下载模型' }).click()
     const catalog = page.getByTestId('her-memory-models')
     await expect.poll(async () => await catalog.textContent()).toContain('EmbeddingGemma')
     expect(await catalog.textContent()).toContain('使用中')

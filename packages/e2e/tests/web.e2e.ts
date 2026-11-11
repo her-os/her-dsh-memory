@@ -160,6 +160,11 @@ describe('her-memory management tab in DSH web', () => {
 
     await source.selectOption('off')
     await expect.poll(() => page.getByRole('button', { name: '开启本机语义检索' }).count(), { timeout: 30_000 }).toBe(1)
+    // Off still lists the local models, so files can be deleted without turning search back on.
+    const embeddingCard = page.getByTestId('her-memory-embedding')
+    await embeddingCard.getByRole('button', { name: '更换或下载模型' }).click()
+    await expect.poll(() => embeddingCard.getByTestId('her-memory-models').count()).toBe(1)
+    await embeddingCard.getByRole('button', { name: '收起模型列表' }).click()
   })
 
   it('explains how memory works and links to Her', async () => {
