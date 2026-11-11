@@ -59,7 +59,7 @@ export function MemoryTab({ t, api, settings: form }: MemoryTabProps): ReactNode
 
   return (
     <div style={S.page}>
-      <Overview api={api} t={t} overview={overview} run={run} busy={busy} onChanged={changed} selectModel={(id) => { save(['embedding', 'localModel'], id) }} enableLocal={() => { save(['embedding', 'provider'], 'local') }} />
+      <Overview api={api} t={t} overview={overview} run={run} busy={busy} onChanged={changed} selectModel={(id) => { save(['embedding', 'localModel'], id) }} enableLocal={() => { save(['embedding', 'provider'], 'local') }} disable={() => { save(['embedding', 'provider'], 'off') }} />
       {failure === undefined ? null : <span style={S.error}>{t('actionFailed', { error: failure })}</span>}
       <SettingsPanel settings={settings} t={t} busy={busy} save={save} />
       <SegmentedControl<View>
@@ -85,7 +85,7 @@ export function MemoryTab({ t, api, settings: form }: MemoryTabProps): ReactNode
   )
 }
 
-function Overview({ api, t, overview, run, busy, onChanged, selectModel, enableLocal }: {
+function Overview({ api, t, overview, run, busy, onChanged, selectModel, enableLocal, disable }: {
   api: MemoryApi
   t: T
   overview: ReturnType<typeof useLoad<Awaited<ReturnType<MemoryApi['overview']>>>>
@@ -94,6 +94,7 @@ function Overview({ api, t, overview, run, busy, onChanged, selectModel, enableL
   onChanged: () => void
   selectModel: (id: string) => void
   enableLocal: () => void
+  disable: () => void
 }): ReactNode {
   usePoll(overview.value !== undefined && embeddingBusy(overview.value.embedding), overview.reload)
   if (overview.error !== undefined && overview.value === undefined) return <LoadError error={overview.error} retry={overview.reload} t={t} />
@@ -135,7 +136,7 @@ function Overview({ api, t, overview, run, busy, onChanged, selectModel, enableL
         {value.queue > 0 ? <span style={S.caption}>{t('queueLine', { count: value.queue })}</span> : null}
         {value.extractError === null ? null : <span style={S.error}>{t('extractError', { time: when(value.extractError.at), error: value.extractError.message })}</span>}
       </section>
-      <EmbeddingPanel api={api} t={t} embedding={embedding} run={run} busy={busy} onChanged={onChanged} selectModel={selectModel} enableLocal={enableLocal} />
+      <EmbeddingPanel api={api} t={t} embedding={embedding} run={run} busy={busy} onChanged={onChanged} selectModel={selectModel} enableLocal={enableLocal} disable={disable} />
     </>
   )
 }
