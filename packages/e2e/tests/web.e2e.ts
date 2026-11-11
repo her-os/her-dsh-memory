@@ -161,4 +161,12 @@ describe('her-memory management tab in DSH web', () => {
     await source.selectOption('off')
     await expect.poll(() => page.getByRole('button', { name: '开启本机语义检索' }).count(), { timeout: 30_000 }).toBe(1)
   })
+
+  it('explains how memory works and links to Her', async () => {
+    const about = page.getByTestId('her-memory-about')
+    expect(await about.getByText('什么时候记下来').count()).toBe(0)
+    await about.getByRole('button', { name: '这是怎么工作的？' }).click()
+    await expect.poll(() => about.getByText('什么时候记下来').count()).toBe(1)
+    expect(await about.getByRole('link', { name: 'https://hersoul.cn/zh' }).getAttribute('href')).toBe('https://hersoul.cn/zh')
+  })
 })

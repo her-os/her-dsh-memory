@@ -1,7 +1,7 @@
 /**
  * Memory management page on this bundle's page in Plugins: an overview with
  * the pause switch and the semantic-search index, the settings, then
- * memories, people, forgotten items, and trash.
+ * memories, people, forgotten items, and trash, and an about section last.
  */
 
 import { Button, Input, SegmentedControl, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -13,6 +13,7 @@ import { MemoryDetail } from './MemoryDetail.tsx'
 import { MemoryList } from './MemoryList.tsx'
 import { type SettingValue, type SettingsForm, useSettings } from './settings.ts'
 import { SettingsPanel } from './SettingsPanel.tsx'
+import { AboutPanel } from './AboutPanel.tsx'
 import { splitList } from './draft.ts'
 import { type ConfirmRequest, ConfirmDialog, LoadError, S, type T, useAction, useLoad, when } from './ui.tsx'
 
@@ -77,6 +78,7 @@ export function MemoryTab({ t, api, settings: form }: MemoryTabProps): ReactNode
       {view === 'people' ? <PeopleView api={api} t={t} run={run} busy={busy} version={version} onChanged={changed} showPerson={showPerson} /> : null}
       {view === 'suppressions' ? <SuppressionsView api={api} t={t} run={run} busy={busy} version={version} onChanged={changed} /> : null}
       {view === 'trash' ? <TrashView api={api} t={t} open={setOpenId} version={version} confirm={setConfirming} onChanged={changed} /> : null}
+      <AboutPanel t={t} />
       <MemoryDetail id={openId} api={api} t={t} onClose={() => { setOpenId(undefined) }} onChanged={changed} confirm={setConfirming} run={run} busy={busy} />
       <ConfirmDialog request={confirming} onClose={() => { setConfirming(undefined) }} run={run} t={t} />
     </div>
