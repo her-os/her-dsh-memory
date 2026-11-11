@@ -48,6 +48,10 @@ export const zh = {
   personFilter: '人物：{name}',
   clearPerson: '清除',
   total: '共 {count} 条',
+  pagination: '翻页',
+  previousPage: '上一页',
+  nextPage: '下一页',
+  pageOf: '第 {page} / {pages} 页',
 
   'kind.profile': '画像',
   'kind.event': '事件',
@@ -287,6 +291,10 @@ export const en: Record<MemoryLocaleKey, string> = {
   personFilter: 'Person: {name}',
   clearPerson: 'Clear',
   total: '{count} total',
+  pagination: 'Pages',
+  previousPage: 'Previous',
+  nextPage: 'Next',
+  pageOf: 'Page {page} of {pages}',
 
   'kind.profile': 'Profile',
   'kind.event': 'Event',

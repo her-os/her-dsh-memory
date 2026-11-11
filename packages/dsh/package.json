@@ -89,7 +89,6 @@
     "@deepseek-ai/schemastery": "3.18.5",
     "@her-os/memory-core": "workspace:*",
     "@her-os/memory-local-embed": "workspace:*",
-    "@tanstack/react-virtual": "3.13.12",
     "@types/react": "~18.3.1",
     "react": "^18.2.0",
     "tsdown": "^0.22.2",
