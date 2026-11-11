@@ -154,7 +154,7 @@ export const Config: z<ConfigInput, LiveConfig> = z.object({
       z.const('local').description('本机模型：第一次使用时在后台下载，之后离线可用'),
       z.const('remote').description('云端服务：OpenAI 兼容的 embeddings 接口'),
       z.const('off').description('关闭：只用关键词检索'),
-    ]).default('local').description('语义检索用什么生成向量。能找到意思相近、字面不同的记忆，例如「主子不吃饭」想起「养了只橘猫」。').volatile(),
+    ]).default('off').description('语义检索用什么生成向量。能找到意思相近、字面不同的记忆，例如「主子不吃饭」想起「养了只橘猫」。默认关闭，只用关键词检索；选本机模型会下载约 300 MB，常驻内存约 0.5 GB。').volatile(),
     localModel: z.union(LOCAL_MODELS.map(model => z.const(model.id).description(modelLabel(model)))).default(DEFAULT_LOCAL_MODEL)
       .description('本机模型。越大效果越好，但下载更久、占内存更多。切换后会在后台重新计算全部向量。').volatile(),
     downloadSource: z.union([

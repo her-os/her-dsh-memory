@@ -68,7 +68,7 @@ function statusTag(embedding: EmbeddingStatus, t: T): [TagTone, string] {
  * @param props - api, translator, status, action runner, refresh and model selection.
  * @returns the card.
  */
-export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged, selectModel }: {
+export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged, selectModel, enableLocal }: {
   api: MemoryApi
   t: T
   embedding: EmbeddingStatus
@@ -77,6 +77,8 @@ export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged, select
   onChanged: () => void
   /** Select a local model in the settings; the Host then downloads and loads it. */
   selectModel: (id: string) => void
+  /** Switch the source to the local model; the Host then downloads it. */
+  enableLocal: () => void
 }): ReactNode {
   const [test, setTest] = useState<string | undefined>()
   const [catalogOpen, setCatalogOpen] = useState(false)
@@ -132,6 +134,14 @@ export function EmbeddingPanel({ api, t, embedding, run, busy, onChanged, select
             : null}
         </span>
       </div>
+      {embedding.provider === 'off'
+        ? (
+            <div style={S.row}>
+              <Button size="sm" variant="primary" disabled={busy} onClick={enableLocal}>{t('enableLocal')}</Button>
+              <span style={S.caption}>{t('enableLocalHint')}</span>
+            </div>
+          )
+        : null}
       {local === null ? null : <span style={local.state === 'error' ? S.error : S.caption} data-testid="her-memory-local-state">{localLine(local, t)}</span>}
       {progress === undefined
         ? null

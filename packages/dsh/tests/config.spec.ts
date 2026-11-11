@@ -17,7 +17,7 @@ describe('resolveConfig', () => {
 
   it('downloads the default local model from any mirror by default', () => {
     const config = Config({})
-    expect(config.embedding).toMatchObject({ provider: 'local', localModel: 'embeddinggemma-q4', downloadSource: 'auto', unloadAfterMinutes: 0 })
+    expect(config.embedding).toMatchObject({ provider: 'off', localModel: 'embeddinggemma-q4', downloadSource: 'auto', unloadAfterMinutes: 0 })
   })
 
   it('uses an explicit path as given', () => {
