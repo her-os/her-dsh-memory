@@ -1,6 +1,6 @@
 # her-dsh-memory
 
-Her 的长期记忆插件，跑在 DeepSeek Harness（DSH）上。内部仓库，全部版本做完前不公开。
+Her 的长期记忆插件，跑在 DeepSeek Harness（DSH）上：自动记住聊天里的重要信息，下次对话时自然想起。由北京词元共振智能科技有限公司开发，了解 Her：https://hersoul.cn/zh
 
 ## 包
 
@@ -8,7 +8,7 @@ Her 的长期记忆插件，跑在 DeepSeek Harness（DSH）上。内部仓库�
 |---|---|---|
 | `packages/core` | `@her-os/memory-core` | 不依赖 DSH 的记忆库：建表、迁移，后续加检索、提取、生命周期 |
 | `packages/dsh` | `@her-os/dsh-memory` | DSH bundle：Host 插件（`lib/index.js`）+ 浏览器端（`lib/client.js`）+ `cordis.patch.yml` |
-| `packages/local-embed` | `@her-os/memory-local-embed` | 本机向量模型：首次使用时下载 ONNX Runtime 和模型，DSH 插件和 Her 客户端共用；`bench/` 里是效果和压测脚本 |
+| `packages/local-embed` | `@her-os/memory-local-embed` | 本机向量模型：首次使用时下载 ONNX Runtime 和模型；`bench/` 里是效果和压测脚本 |
 | `packages/e2e` | `@her-os/dsh-memory-e2e` | 在真实 DSH（headless 和 Web）里跑的端到端测试 |
 
 ## 开发
@@ -54,12 +54,18 @@ pnpm test:e2e    # 打包插件，装进临时 DSH_HOME，用假模型跑 headle
 
 8-bit 在这台机器上效果和 4-bit 相同，却更慢、更占内存，留作对照。
 
+模型许可：EmbeddingGemma 受 Google [Gemma 使用条款](https://ai.google.dev/gemma/terms) 约束，选用即表示接受；BGE small 中文、multilingual-e5-small、BGE-M3 为 MIT 许可。模型文件在用户本机下载，不随插件分发。
+
 支持 Apple 芯片 Mac、Windows（x64/arm64）、Linux（x64/arm64）；Intel Mac 没有预编译的 Runtime，页面会提示改用云端服务。
 
-效果和压测：`node packages/local-embed/bench/eval.ts --root <缓存目录> --model <模型 id|keyword> [--set <评测集>] [--stress 10000]`。默认用仓库里的公开小样例；内部测试集不进仓库，用 `--set` 指过去。
+效果和压测：`node packages/local-embed/bench/eval.ts --root <缓存目录> --model <模型 id|keyword> [--set <评测集>] [--stress 10000]`。默认用仓库里的公开小样例，也可以用 `--set` 指定自己的评测集。
 
 数据库默认在 `$DSH_HOME/her-memory/memory.db`（没设 `DSH_HOME` 时是 `~/.dsh/her-memory/memory.db`）。
 
 ## 浏览器端构建
 
 DSH 的浏览器端插件要按它的模块加载格式打包：整个文件是一次 `window.__ModuleLoader__.load({ id, factory })` 调用，共享模块通过注入的 `require` 取。DSH 自己的 `clientBundle` 预设没有发布，`packages/dsh/tsdown.config.ts` 照它重写了一份；只有 DSH 页面提供的平台模块（React、cordis、ui-slots 等）留作外部依赖，其余全部打进包里。
+
+## 许可证
+
+[MIT](LICENSE)。本机向量模型各有自己的许可，见上文「语义检索」。

@@ -1,8 +1,8 @@
 {
   "name": "@her-os/dsh-memory",
   "version": "0.0.1",
-  "description": "Her long-term memory for DeepSeek Harness",
-  "private": true,
+  "description": "Her 的长期记忆：自动记住聊天里的重要信息，下次对话时自然想起。由北京词元共振智能科技有限公司开发。",
+  "license": "MIT",
   "author": "Her",
   "repository": {
     "type": "git",
@@ -28,7 +28,8 @@
     "lib/client.js.map",
     "lib/typert.host.js",
     "lib/typert.remote-client.js",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "README.md"
   ],
   "engines": {
     "dsh": ">=0.2.1-rc.2"
@@ -125,5 +126,6 @@
     "@deepseek-ai/dsh-home-paths": {
       "optional": true
     }
-  }
+  },
+  "homepage": "https://hersoul.cn/zh"
 }

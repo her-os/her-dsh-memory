@@ -2,6 +2,7 @@
   "name": "@her-os/memory-core",
   "version": "0.0.0",
   "description": "Host-independent memory store, retrieval and lifecycle for Her",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "exports": {
