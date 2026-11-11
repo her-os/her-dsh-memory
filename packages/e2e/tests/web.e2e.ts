@@ -172,6 +172,6 @@ describe('her-memory management tab in DSH web', () => {
     expect(await about.getByText('什么时候记下来').count()).toBe(0)
     await about.getByRole('button', { name: '这是怎么工作的？' }).click()
     await expect.poll(() => about.getByText('什么时候记下来').count()).toBe(1)
-    expect(await about.getByRole('link', { name: 'https://hersoul.cn/zh' }).getAttribute('href')).toBe('https://hersoul.cn/zh')
+    expect(await about.getByRole('link', { name: /了解 Her/u }).getAttribute('href')).toBe('https://hersoul.cn/zh')
   })
 })
