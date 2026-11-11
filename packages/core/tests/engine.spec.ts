@@ -150,6 +150,12 @@ describe('recall', () => {
     expect(raised.text).toContain('敏感')
   })
 
+  it('files a saved memory as a profile fact unless told otherwise', async () => {
+    h = makeEngine()
+    expect((await h.engine.save({ content: '用户希望助手使用中文交流', scope: 'global' })).kind).toBe('profile')
+    expect((await h.engine.save({ content: '用户不吃香菜', scope: 'global', kind: 'preference' })).kind).toBe('preference')
+  })
+
   it('does not repeat a memory already injected in the session', async () => {
     h = makeEngine()
     const m = await h.engine.save({ content: '用户养了一只叫团子的猫', scope: 'global', pinned: false })

@@ -64,6 +64,11 @@ export function memoryTools(host: ToolHost): ToolDefinition[] {
       description: 'Save something the user explicitly asked you to remember. Write one fact in the third person ("用户…"), keeping the user\'s hedges such as "可能" or "打算". Do not save on your own initiative; ordinary conversation is remembered automatically.',
       parameters: {
         content: { type: 'string', required: true, description: 'The fact to keep, one sentence.' },
+        kind: {
+          type: 'string',
+          enum: ['profile', 'preference', 'person', 'promise', 'event', 'shared'],
+          description: 'profile: who the user is (home, job, family, pets); preference: likes, dislikes, how they want to be treated; person: someone in their life; promise: a plan or something to follow up; event: something that happened to them; shared: something the user and you did or agreed together. Default profile.',
+        },
         sensitive: { type: 'boolean', description: 'Health, money, relationships, or other private matters.' },
         follow_up: { type: 'string', description: 'When to ask about it again, as the user said it, e.g. "下周三".' },
       },
@@ -74,7 +79,7 @@ export function memoryTools(host: ToolHost): ToolDefinition[] {
       async execute(args, exec) {
         if (host.paused()) throw new Error('memory is paused by the user; nothing was saved')
         const memory = await host.engine.save({
-          content: args.content, scope: host.scopeOf(exec.agent).scope, sensitive: args.sensitive ?? false,
+          content: args.content, scope: host.scopeOf(exec.agent).scope, sensitive: args.sensitive ?? false, ...args.kind === undefined ? {} : { kind: args.kind },
           followUp: args.follow_up ?? null, sessionId: exec.agent?.session.id ?? null,
         })
         return view(memory)

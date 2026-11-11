@@ -98,7 +98,7 @@ describe('her-memory in DSH headless', () => {
       if (request.extraction) return extractionReply([])
       const asked = request.lastUser.includes('记住我对花生过敏')
       const answered = request.messages.some(message => message.text.includes('[tool_result]'))
-      if (asked && !answered && request.tools.includes('memory_save')) return { tool: { name: 'memory_save', input: { content: '用户对花生过敏', sensitive: true } } }
+      if (asked && !answered && request.tools.includes('memory_save')) return { tool: { name: 'memory_save', input: { content: '用户对花生过敏', kind: 'preference', sensitive: true } } }
       return { text: DEFAULT_ANSWER }
     })
     const start = mock.requests.length
@@ -106,7 +106,7 @@ describe('her-memory in DSH headless', () => {
     const followUp = since(start).find(request => request.messages.some(message => message.text.includes('[tool_result]')))
     expect(followUp?.messages.at(-1)?.text).toMatch(/Saved as #\d+/u)
     const saved = memories().find(row => row.content === '用户对花生过敏')
-    expect(saved).toMatchObject({ status: 'active', sensitive: 1 })
+    expect(saved).toMatchObject({ status: 'active', sensitive: 1, kind: 'preference' })
   })
 
   it('extracts a short session on the next run, dropping memories whose evidence is not in the conversation', async () => {
