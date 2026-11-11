@@ -1,18 +1,14 @@
 /**
- * Filterable memory list. Rows are virtualized and fetched page by page as
- * the user scrolls, so tens of thousands of memories stay responsive.
+ * Filterable memory list, one page at a time with previous and next buttons.
  */
 
 import { Button, Checkbox, Input, SegmentedControl, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
-import { useVirtualizer } from '@tanstack/react-virtual'
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { KINDS, type Kind, type ListFilter, type MemoryApi, type MemoryItem, type Status } from './api.ts'
 import { S, type T, messageOf } from './ui.tsx'
 
-/** Rows fetched per request. */
-export const PAGE_SIZE = 100
-const ROW_ESTIMATE = 68
-const LIST_HEIGHT = 520
+/** Rows shown per page. */
+export const PAGE_SIZE = 20
 
 type StatusView = 'current' | 'archived' | 'history' | 'all'
 
@@ -63,10 +59,13 @@ export function MemoryList({ api, t, person, clearPerson, open, version }: {
   const [sensitive, setSensitive] = useState(false)
   const [items, setItems] = useState<MemoryItem[]>([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  // The page the shown rows belong to; it trails `page` while the next one loads.
+  const [shown, setShown] = useState(1)
   const [error, setError] = useState<string | undefined>()
   const [loading, setLoading] = useState(false)
   const generation = useRef(0)
-  const inFlight = useRef(false)
+  const top = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const timer = setTimeout(() => { setQuery(search.trim()) }, 250)
@@ -83,46 +82,44 @@ export function MemoryList({ api, t, person, clearPerson, open, version }: {
   }
   const filterKey = JSON.stringify(filter)
 
-  const fetchPage = useCallback(async (offset: number, reset: boolean) => {
-    if (inFlight.current && !reset) return
-    const request = reset ? ++generation.current : generation.current
-    inFlight.current = true
+  // A new filter starts over from the first page.
+  useEffect(() => { setPage(1) }, [filterKey])
+
+  const load = useCallback(async () => {
+    const request = ++generation.current
     setLoading(true)
     try {
-      const page = await api.list(JSON.parse(filterKey) as ListFilter, offset, PAGE_SIZE)
+      const result = await api.list(JSON.parse(filterKey) as ListFilter, (page - 1) * PAGE_SIZE, PAGE_SIZE)
       if (request !== generation.current) return
-      setItems(current => reset ? page.items : [...current, ...page.items])
-      setTotal(page.total)
+      // A page past the end, e.g. after deleting the last row on it, falls back to the last page.
+      const last = Math.max(1, Math.ceil(result.total / PAGE_SIZE))
+      if (page > last) {
+        setPage(last)
+        return
+      }
+      setItems(result.items)
+      setShown(page)
+      setTotal(result.total)
       setError(undefined)
     } catch (failure) {
       if (request === generation.current) setError(messageOf(failure))
     } finally {
-      if (request === generation.current) {
-        inFlight.current = false
-        setLoading(false)
-      }
+      if (request === generation.current) setLoading(false)
     }
-  }, [api, filterKey])
+  }, [api, filterKey, page])
 
-  useEffect(() => { void fetchPage(0, true) }, [fetchPage, version])
+  useEffect(() => { void load() }, [load, version])
 
-  const scroller = useRef<HTMLDivElement>(null)
-  const virtualizer = useVirtualizer({
-    count: items.length,
-    getScrollElement: () => scroller.current,
-    estimateSize: () => ROW_ESTIMATE,
-    overscan: 8,
-  })
-  const virtualRows = virtualizer.getVirtualItems()
-  const lastIndex = virtualRows.at(-1)?.index ?? -1
-  useEffect(() => {
-    if (lastIndex >= items.length - 10 && items.length < total && !loading) void fetchPage(items.length, false)
-  }, [lastIndex, items.length, total, loading, fetchPage])
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const go = (next: number): void => {
+    setPage(next)
+    top.current?.scrollIntoView({ block: 'nearest' })
+  }
 
   const nothingStored = items.length === 0 && !loading && error === undefined && filterKey === JSON.stringify({ statuses: STATUS_VIEWS.current })
 
   return (
-    <div style={S.page}>
+    <div style={S.page} ref={top}>
       <div style={S.row}>
         <Input type="search" placeholder={t('search')} aria-label={t('search')} value={search} onChange={(event) => { setSearch(event.target.value) }} style={{ minWidth: 200 }} />
         <select aria-label={t('kind')} style={S.select} value={kind} onChange={(event) => { setKind(event.target.value as Kind | '') }}>
@@ -158,45 +155,44 @@ export function MemoryList({ api, t, person, clearPerson, open, version }: {
       {error === undefined ? null : (
         <div style={S.row}>
           <span style={S.error}>{t('loadFailed', { error })}</span>
-          <Button size="sm" variant="outline" onClick={() => { void fetchPage(0, true) }}>{t('retry')}</Button>
+          <Button size="sm" variant="outline" onClick={() => { void load() }}>{t('retry')}</Button>
         </div>
       )}
       {items.length === 0 && !loading && error === undefined
         ? <p style={S.secondary}>{nothingStored ? t('empty') : t('noMatch')}</p>
         : (
-            <div ref={scroller} style={{ height: LIST_HEIGHT, overflow: 'auto', contain: 'strict' }} role="list" aria-label={t('viewMemories')}>
-              <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
-                {virtualRows.map((row) => {
-                  const memory = items[row.index]
-                  if (memory === undefined) return null
-                  return (
-                    <div
-                      key={memory.id}
-                      role="listitem"
-                      data-index={row.index}
-                      ref={virtualizer.measureElement}
-                      style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${row.start}px)`, paddingBottom: 6, boxSizing: 'border-box' }}
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, opacity: loading ? 0.6 : 1 }} role="list" aria-label={t('viewMemories')}>
+                {items.map(memory => (
+                  <div key={memory.id} role="listitem">
+                    <button
+                      type="button"
+                      onClick={() => { open(memory.id) }}
+                      style={{ ...S.card, width: '100%', textAlign: 'left', cursor: 'pointer', font: 'inherit', gap: 4 }}
                     >
-                      <button
-                        type="button"
-                        onClick={() => { open(memory.id) }}
-                        style={{ ...S.card, width: '100%', textAlign: 'left', cursor: 'pointer', font: 'inherit', gap: 4 }}
-                      >
-                        <span style={{ ...S.primary, overflowWrap: 'anywhere' }}>{memory.content}</span>
-                        <span style={S.between}>
-                          <MemoryTags memory={memory} t={t} />
-                          <span style={S.caption}>
-                            #{memory.id}
-                            {memory.people.length === 0 ? '' : ` · ${memory.people.join('、')}`}
-                            {memory.occurredAt === null ? '' : ` · ${memory.occurredAt}`}
-                          </span>
+                      <span style={{ ...S.primary, overflowWrap: 'anywhere' }}>{memory.content}</span>
+                      <span style={S.between}>
+                        <MemoryTags memory={memory} t={t} />
+                        <span style={S.caption}>
+                          #{memory.id}
+                          {memory.people.length === 0 ? '' : ` · ${memory.people.join('、')}`}
+                          {memory.occurredAt === null ? '' : ` · ${memory.occurredAt}`}
                         </span>
-                      </button>
-                    </div>
-                  )
-                })}
+                      </span>
+                    </button>
+                  </div>
+                ))}
               </div>
-            </div>
+              {pages > 1
+                ? (
+                    <nav style={{ ...S.row, justifyContent: 'center' }} aria-label={t('pagination')}>
+                      <Button size="sm" variant="outline" disabled={shown <= 1 || loading} onClick={() => { go(shown - 1) }}>{t('previousPage')}</Button>
+                      <span style={S.caption}>{t('pageOf', { page: shown, pages })}</span>
+                      <Button size="sm" variant="outline" disabled={shown >= pages || loading} onClick={() => { go(shown + 1) }}>{t('nextPage')}</Button>
+                    </nav>
+                  )
+                : null}
+            </>
           )}
     </div>
   )

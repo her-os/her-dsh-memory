@@ -6,6 +6,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { type Browser, chromium, type Page } from 'playwright-core'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { DshHome, type WebServer } from '../src/dsh.ts'
@@ -165,6 +166,27 @@ describe('her-memory management tab in DSH web', () => {
     await embeddingCard.getByRole('button', { name: '更换或下载模型' }).click()
     await expect.poll(() => embeddingCard.getByTestId('her-memory-models').count()).toBe(1)
     await embeddingCard.getByRole('button', { name: '收起模型列表' }).click()
+  })
+
+  it('pages through a long list with previous and next', async () => {
+    const db = new DatabaseSync(home.dbPath)
+    const now = new Date().toISOString()
+    const insert = db.prepare("INSERT INTO memories (content, kind, learned_at, created_at, updated_at) VALUES (?, 'person', ?, ?, ?)")
+    for (let i = 1; i <= 25; i++) insert.run(`翻页测试记忆 ${i}`, now, now, now)
+    db.close()
+    const kind = page.getByLabel('类型', { exact: true })
+    await kind.selectOption('person')
+    const list = page.getByRole('list', { name: '记忆', exact: true })
+    await expect.poll(() => page.getByText('第 1 / 2 页').count()).toBe(1)
+    expect(await list.getByRole('listitem').count()).toBe(20)
+    expect(await page.getByRole('button', { name: '上一页' }).isDisabled()).toBe(true)
+    await page.getByRole('button', { name: '下一页' }).click()
+    await expect.poll(() => page.getByText('第 2 / 2 页').count()).toBe(1)
+    await expect.poll(() => list.getByRole('listitem').count()).toBe(5)
+    expect(await page.getByRole('button', { name: '下一页' }).isDisabled()).toBe(true)
+    // Changing the filter starts again from the first page.
+    await kind.selectOption('')
+    await expect.poll(() => page.getByText('第 1 / 2 页').count()).toBe(1)
   })
 
   it('explains how memory works and links to Her', async () => {
