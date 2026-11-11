@@ -69,3 +69,14 @@ DSH 的浏览器端插件要按它的模块加载格式打包：整个文件是�
 ## 许可证
 
 [MIT](LICENSE)。本机向量模型各有自己的许可，见上文「语义检索」。
+
+## 发布到 npm
+
+插件以 `@her-os/dsh-memory` 发布到 npm，用户在 DSH 插件页按包名安装，之后也能在插件页收到更新。发布要用 npm 上 `her-os` 组织的账号登录：
+
+```sh
+pnpm install
+pnpm --filter @her-os/dsh-memory publish   # 先构建，再以公开包发布
+```
+
+发布前把 `packages/dsh/package.json` 的 `version` 改成新版本号。
