@@ -733,7 +733,8 @@ export class MemoryEngine {
   }
 
   /**
-   * Save a memory the user explicitly asked to keep; pinned by default.
+   * Save a memory the user explicitly asked to keep; pinned by default. Without a kind it is a profile fact,
+   * which is never brought up unprompted.
    * @param request - content and options.
    * @returns the stored memory.
    */
@@ -742,7 +743,7 @@ export class MemoryEngine {
     const today = calendarDay(now, this.ports.clock)
     const memory = this.repo.transaction(() => this.repo.insert({
       content: request.content.trim(),
-      kind: request.kind ?? 'shared',
+      kind: request.kind ?? 'profile',
       sensitive: request.sensitive ?? false,
       pinned: request.pinned ?? true,
       importance: 3,
