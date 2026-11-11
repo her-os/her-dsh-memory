@@ -31,7 +31,7 @@ pnpm test:e2e    # 打包插件，装进临时 DSH_HOME，用假模型跑 headle
 
 ## 语义检索
 
-默认用本机模型（设置里「语义检索来源」：本地模型 / 云端服务 / 关闭）。第一次启用时在后台下载 ONNX Runtime（约 115 MB）和所选模型，存在 `$DSH_HOME/her-memory/embedding/`；下好之前只用关键词检索，下好后自动给已有记忆补向量。下载先走 Hugging Face，失败换 ModelScope（npm 包走 npmjs，失败换 npmmirror），支持断点续传和校验，多个 DSH 进程同时启动只有一个在下。
+默认关闭，只用关键词检索（SQLite FTS5，BM25 排序）。在记忆页点「开启本机语义检索」，或在设置里把「语义检索来源」改成本地模型 / 云端服务即可开启。选本地模型时在后台下载 ONNX Runtime（约 115 MB）和所选模型，存在 `$DSH_HOME/her-memory/embedding/`；下好之前只用关键词检索，下好后自动给已有记忆补向量。下载先走 Hugging Face，失败换 ModelScope（npm 包走 npmjs，失败换 npmmirror），支持断点续传和校验，多个 DSH 进程同时启动只有一个在下。
 
 | 模型 | 下载 | 效果 | 速度 | 内存 | 语言 |
 |---|---|---|---|---|---|

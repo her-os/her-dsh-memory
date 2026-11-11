@@ -159,6 +159,6 @@ describe('her-memory management tab in DSH web', () => {
     await expect.poll(() => patchText('web'), { timeout: 30_000 }).toMatch(/extractBeforeRecall\W+false/u)
 
     await source.selectOption('off')
-    await expect.poll(() => page.getByText(/只用关键词检索。可在下方「设置」里/u).count(), { timeout: 30_000 }).toBeGreaterThan(0)
+    await expect.poll(() => page.getByRole('button', { name: '开启本机语义检索' }).count(), { timeout: 30_000 }).toBe(1)
   })
 })

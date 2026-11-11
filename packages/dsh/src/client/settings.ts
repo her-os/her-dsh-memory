@@ -65,7 +65,9 @@ export function useSettings(form: SettingsForm): Settings {
   const [subscribe, read] = useMemo(() => [form.subscribe.bind(form), form.getSnapshot.bind(form)] as const, [form])
   const snapshot = useSyncExternalStore(subscribe, read)
   const set = useCallback(
-    (path: readonly string[], value: SettingValue): Promise<boolean> => form.mutate([{ op: 'set', path: [...path], value }], form.getSnapshot().revision),
+    // No pinned revision: DSH queues writes in order behind the latest known one, so a second edit made
+    // before the first one's reload lands is not refused as stale.
+    (path: readonly string[], value: SettingValue): Promise<boolean> => form.mutate([{ op: 'set', path: [...path], value }]),
     [form],
   )
   return { snapshot, set }
