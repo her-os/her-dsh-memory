@@ -1,6 +1,6 @@
 {
   "name": "@her-os/dsh-memory",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Her 的长期记忆：自动记住聊天里的重要信息，下次对话时自然想起。由北京词元共振智能科技有限公司开发。",
   "license": "MIT",
   "author": "Her",
@@ -50,7 +50,8 @@
   },
   "scripts": {
     "build": "rm -rf lib && tsdown",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "prepublishOnly": "pnpm run build"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.5",
@@ -126,5 +127,8 @@
       "optional": true
     }
   },
-  "homepage": "https://hersoul.cn/zh"
+  "homepage": "https://hersoul.cn/zh",
+  "publishConfig": {
+    "access": "public"
+  }
 }
