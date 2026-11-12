@@ -20,7 +20,7 @@ DeepSeek Harness（DSH）的长期记忆插件：自动记住聊天里的重要�
 
 ## 安装
 
-在 DSH 的插件页安装本插件，装好后在设置 → 插件里打开「记忆」标签页。从源码构建见[仓库 README](https://github.com/her-os/her-dsh-memory#readme)。
+在 DSH 的插件页按包名 `@her-os/dsh-memory` 安装，或执行 `dsh plugin add @her-os/dsh-memory`。桌面版装好后完全退出再打开，然后在设置 → 插件里打开「记忆」标签页。从源码构建见[仓库 README](https://github.com/her-os/her-dsh-memory#readme)。
 
 ## 许可证
 
